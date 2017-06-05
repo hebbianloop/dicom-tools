@@ -1,0 +1,281 @@
+#!/bin/bash
+# Extract a Single Subject's DICOM from CFMI File-Systems 
+
+# Default Arguments
+## Output Data Here
+o=$(pwd)
+## Raw Data Directory Here (should be directory with ./years/mos/days)
+r=${CFMIDICOMDIR}
+## Subject Name
+s='453604'
+## Subject Scan Date
+y='2016'
+m='04'
+d='04'
+## Extract Specific Sequence?
+t=''
+## Exclude subject identifiers?
+private=''
+# Function Definitions
+## Show the help documentation
+function fetchdicom_help(){
+	helpstr=$(cat <<-EOF
+
+	Usage :: ${0##*/} 	[-h|--help] [-r|--rawdatadir PATH] [-o|--outputdir PATH] [-s|--subject] 
+						\t\t\t[-y|--year YYYY] [-m|--month MM] [-d|--day DD] [-t|--tasks LIST]
+
+	Search for Seimens .IMA files in the raw data directory for a subject scanned on YYYY-MM-DD. User can specify tasks 
+	for extraction, or leave blank to extract everything. Dicoms are placed in the output directory.
+
+	Required Arguments
+		  \t-r  --rawdatadir\t\tpath to dicoms (subdirectory tree must follow ./YYYY/MM/DD)
+	      \t-o  --outputdir\t\t\textract dicoms here	       
+	      \t-s  --subject\t\t\tsubject ID
+	      \t-y  --year\t\t\tyear of scan date
+	      \t-m  --month\t\t\tmonth of scan date
+	      \t-d  --day\t\t\tday of scan date
+
+	Optional Arguments 	      
+	      \t-t  --tasks\t\t\tlist of tasks to extract data for (series description)
+	      \t-prv --private\t\t\tomit identifiers from meta data text file (will still be present in dcm headers)
+	      
+
+	Other Arguments
+		  \t-h  --help\t\t\tdisplays this message\n\n
+
+
+	EOF)
+	echo -e "${helpstr}"
+}
+# Define Function
+## Parse Input Arguments
+function fetchdicom_parseoptions(){
+	while :; do
+		case ${1} in
+			-h|--help)
+			fetchdicom_help
+			exit
+			;;
+			-prv|--private)
+				private='omit identifiers'
+			;;
+			-r|--rawdatadir)
+				if [ -n "${2}" ]; then
+					r=${2}
+					shift
+				else
+					echo -e "ERROR -r --rawdatadir requires a non-empty option argument.\n" >&2
+					exit
+				fi
+			;;
+			-o|--outputdir)
+				if [ -n "${2}" ]; then
+					o=${2}
+					shift
+				else
+					echo -e "ERROR -o --outputdir requires a non-empty option argument.\n" >&2
+					exit
+				fi
+			;;
+			-s|--subject)
+				if [ -n "${2}" ]; then
+					s=${2}
+					shift
+				else
+					echo -e "Error -s --subject requires a non-empty option argument.\n" >2&
+					exit
+				fi
+			;;
+        	-y|--year)
+            	if [ -n "${2}" ]; then
+                	y=${2}
+                	shift
+            	else
+                	echo -e "ERROR:  -y --year requires a non-empty option argument.\n" >&2
+                	exit 
+            	fi
+            ;;            
+	        -m|--month)
+	            if [ -n "${2}" ]; then
+	                m=${2}
+	                shift
+	            else
+	                echo "ERROR:  -m --month requires a non-empty option argument.\n" >&2
+	                exit 
+	            fi
+	        ;;  
+	        -d|--day)
+	            if [ -n "${2}" ]; then
+	                d=${2}
+	                shift
+	            else
+	                echo -e "ERROR:  -d --day requires a non-empty option argument.\n" >&2
+	                exit 
+	            fi
+	        ;;                        
+	        -t|--tasks)
+	            if [ -n "${2}" ]; then
+	                t=${2}
+	                shift
+	            else
+	                echo -e "ERROR:  -t --tasks requires a non-empty option argument.\n" >&2
+	                exit 
+	            fi
+	        ;;	
+	        -?*)
+	            printf 'WARN: Unknown option (ignored): %s\n' "$1" >&2
+	        ;;
+	        *)
+	            break
+	    esac
+	    shift
+	done
+}
+# Define Function
+## Check for dependencies
+function fetchdicom_dependencies(){
+	# Check for AFNI
+	[ -z "$(which dicom_hdr)" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  AFNI does not appear to be properly installed.. exiting..." && exit
+}
+# Define Function
+## Check if subject data exists
+function fetchdicom_checkdataexists(){
+	# Check if raw data directory exists
+	[ ! -d "${r}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Directory (${r}) Cannot be Found.. exiting..." && exit
+	[ ! -d "${r}/${y}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Year ${y}.. exiting..." && exit
+	[ ! -d "${r}/${y}/${m}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Month ${m}.. exiting..." && exit
+	[ ! -d "${r}/${y}/${m}/${d}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Day ${y}-${m}-${d}.. exiting..." && exit
+	# check for existence of sessions on this day
+	local studies=$(ls -ld ${r}/${y}/${m}/${d}/*.STU | awk '{print $8}')
+	[ -z "${studies}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  No Studies Exist on ${y}-${m}-${d} (directory is empty)... exiting.." && exit
+}
+function fetchdicom_parsedcmheader(){
+	# No need to loop through .IMAs.. just grab meta data from first file in list
+	local dicomfile=$(ls -dl *.IMA | tail -n +1 | head -1 | awk '{print $NF}')
+	# Get Subject Name
+	subject=$(dicom_hdr $dicomfile | grep 'Patient Name' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	# Break Out of Loop Over Acquistions If They Aren't For the Desired Subject
+	if [ "${subject}" != "${1}" ]; then
+		break
+	else
+		echo -e "\n 🗣  Subject ${s} DICOMS found :: ${stu}"
+		# Get Series Name
+		seriesname=$(dicom_hdr $dicomfile | grep 'ID Series Description' | sed 's/.*\[.*\/\/\(.*\)/\1/')				
+		[ -z ${private} ] && local age=$(dicom_hdr $dicomfile | grep 'Patient Age' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		[ -z ${private} ] && local sex=$(dicom_hdr $dicomfile | grep 'Patient Sex' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		[ -z ${private} ] && local wgt=$(dicom_hdr $dicomfile | grep 'Patient Weight' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		# Get PI Name
+		local piname=$(dicom_hdr $dicomfile | grep 'ID Study Description' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local hardware=$(dicom_hdr $dicomfile | grep 'ID Manufacturer Model Name' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local manufacturer=$(dicom_hdr $dicomfile | grep 'ID Manufacturer' | sed 's/.*\[.*\/\/\(.*\)/\1/') && manufacturer=$(echo ${manufacturer})
+		# Get Date & time
+		local scandate=$(dicom_hdr $dicomfile | grep 'ID Image Date' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local sesstime=$(dicom_hdr $dicomfile | grep 'PRC PPS Start Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local scantime=$(dicom_hdr $dicomfile | grep 'ID Image Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		# Get Information About Sequence Acquisition
+		local seqname=$(dicom_hdr $dicomfile | grep 'ACQ Sequence Name' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local thk=$(dicom_hdr $dicomfile | grep 'ACQ Slice Thickness' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local rt=$(dicom_hdr $dicomfile | grep 'ACQ Repetition Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local et=$(dicom_hdr $dicomfile | grep 'ACQ Echo Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local imgf=$(dicom_hdr $dicomfile | grep 'ACQ Imaging Frequency' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local imgnuc=$(dicom_hdr $dicomfile | grep 'ACQ Imaged Nucleus' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local echnum=$(dicom_hdr $dicomfile | grep 'ACQ Echo Number' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local tesla=$(dicom_hdr $dicomfile | grep 'ACQ Magnetic Field Strength' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local slcspacing=$(dicom_hdr $dicomfile | grep 'ACQ Spacing Between Slices' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local phaseencstps=$(dicom_hdr $dicomfile | grep 'ACQ Number of Phase Encoding Steps' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local echtrl=$(dicom_hdr $dicomfile | grep 'ACQ Echo Train Length' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local persamp=$(dicom_hdr $dicomfile | grep 'ACQ Percent Sampling' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local perfov=$(dicom_hdr $dicomfile | grep 'ACQ Percent Phase Field of View' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local phzencd=$(dicom_hdr $dicomfile | grep 'ACQ Phase Encoding Direction' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local flipang=$(dicom_hdr $dicomfile | grep 'ACQ Flip Angle' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+		local vers=$(dicom_hdr $dicomfile | grep 'ACQ Software Version' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	fi
+	# Create Text
+	metadata=$(cat <<-EOF
+	--------------------------------------------------------------------------------------
+	PI\t\t\t${piname##PI\'s^}
+	
+	Subject ID\t\t${subject}
+	Age\t\t\t${age}
+	Sex\t\t\t${sex}
+	Weight(kg)\t\t${wgt}
+	
+	Scan Date\t\t${scandate}
+	Session Start Time\t${sesstime}
+
+	Sequence Description\t${seriesname}
+	Sequence Start Time\t${scantime}
+	
+	Acquisition Hardware -- ${manufacturer}
+	Acquisition Software -- ${vers}
+	--------------------------------------------------------------------------------------
+	Internal Sequence Name\t\t${seqname}
+	\nScanning Parameters ::
+
+	\tMagnetic Field Str\t${tesla}T
+	\tRepetition Time\t\t${rt} ms
+	\tEcho Time\t\t${et} ms
+	\tEcho Number\t\t${echnum}
+	\tEcho Train Length\t${echtrl}
+	\tPercent Sampling\t${persamp}%
+
+	\tFlip Angle\t\t${flipang} deg
+	\tPhase Encoding\t\t${phzencd}
+	\tPhase Encoding Steps\t${phaseencstps}
+	\tPercent Phase FOV\t${perfov}%
+
+	\tSlice Thickness\t\t${thk}mm
+	\tSlice Spacing\t\t${slcspacing}mm
+
+	\tImaging Frequency\t${imgf}Hz
+	\tImaging Atom\t\t${imgnuc}
+
+	--------------------------------------------------------------------------------------
+	This file was generated on $(date) by $(whoami)@$(hostname)\n
+	EOF)	
+}
+# Define Function
+## Parse Meta-Data
+function fetchdicom_dataseek(){
+	# Define the list of files to extract
+	dicomlist=()
+	# Loop Across All Studies on This Day
+	for stu in $(ls -ld ${r}/${y}/${m}/${d}/*.STU | awk '{print $NF}'); do
+		# Loop Across All Series Protocols (Different Types of Scans)
+		for ser in $(ls -ld ${stu}/*.SER | awk '{print $NF}'); do
+			# Loop Across All the Time Points Acquired
+			for acq in $(ls -ld ${ser}/*.ACQ | awk '{print $NF}'); do
+				# Move to dicoms dir (dicom_hdr only works when you are in parent dir)
+				cd $acq
+				# Read the dicom header.. most importantly return subject and series names
+				fetchdicom_parsedcmheader ${s}
+				# Break out of acq loop if this is not the right subject
+				[ "${subject}" != "${s}" ] && break
+				# Break out of acq loop if this series does not match subject
+				[ ! -z "${t}" ] && checktask=$(echo ${seriesname} | grep ${t}) && [ -z "${checktask}" ] && echo 'breaking out of acqs, this series does not match ${t}' && break
+				# Add this file to the list of dicoms to fetch
+				dicomlist+=("${acq}")
+				echo -e "${metadata}"
+			done
+		done
+		[ "${subject}" = "${s}" ] && echo 'found our sub.. breaking out of sessions' && echo $stu && break
+	done
+	cd ${stu}/..
+	echo 'The following files will be extracted :: '
+	echo "${dicomlist[@]}"
+}
+
+function fetchdicom_run(){
+	# Parse Options
+	fetchdicom_parseoptions "$@"
+	# Check that all dependencies are installed
+	fetchdicom_dependencies
+	# Check that the raw data path exists
+	fetchdicom_checkdataexists
+	# Traverse raw data tree and find dicom paths
+	fetchdicom_dataseek
+}
+# Redirect all standard input ($@) to run function and execute program
+fetchdicom_run "$@"
+
+
