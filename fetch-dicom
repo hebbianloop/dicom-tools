@@ -155,10 +155,10 @@ function fetchdicom_parsedcmheader(){
 	# Get Subject Name
 	subject=$(dicom_hdr $dicomfile | grep 'Patient Name' | sed 's/.*\[.*\/\/\(.*\)/\1/')
 	# Break Out of Loop Over Acquistions If They Aren't For the Desired Subject
-	if [ "${subject}" != "${1}" ]; then
+	if [ "${subject}" != "${s}" ]; then
 		break
 	else
-		echo -e "\n 🗣  Subject ${s} DICOMS found :: ${stu}"
+		echo -e "\n 🗣  DICOMS Found for Subject ${s} :: ${stu}"
 		# Get Series Name
 		seriesname=$(dicom_hdr $dicomfile | grep 'ID Series Description' | sed 's/.*\[.*\/\/\(.*\)/\1/')				
 		[ -z ${private} ] && local age=$(dicom_hdr $dicomfile | grep 'Patient Age' | sed 's/.*\[.*\/\/\(.*\)/\1/')
@@ -239,24 +239,24 @@ function fetchdicom_parsedcmheader(){
 function fetchdicom_dataseek(){
 	# Define the list of files to extract
 	dicomlist=()
+	echo -e "🗒  $( ls -ld ${r}/${y}/${m}/${d}/*.STU | awk '{print $NF}' | wc -l) Studies Found on $y-$m-$d"
 	# Loop Across All Studies on This Day
 	for stu in $(ls -ld ${r}/${y}/${m}/${d}/*.STU | awk '{print $NF}'); do
+		echo -e "\t▶️  $(ls -ld ${stu}/*.SER | awk '{print $NF}' | wc -l) Sequences Collected for $(basename ${stu})"
 		# Loop Across All Series Protocols (Different Types of Scans)
 		for ser in $(ls -ld ${stu}/*.SER | awk '{print $NF}'); do
-			# Loop Across All the Time Points Acquired
-			for acq in $(ls -ld ${ser}/*.ACQ | awk '{print $NF}'); do
-				# Move to dicoms dir (dicom_hdr only works when you are in parent dir)
-				cd $acq
-				# Read the dicom header.. most importantly return subject and series names
-				fetchdicom_parsedcmheader ${s}
-				# Break out of acq loop if this is not the right subject
-				[ "${subject}" != "${s}" ] && break
-				# Break out of acq loop if this series does not match subject
-				[ ! -z "${t}" ] && checktask=$(echo ${seriesname} | grep ${t}) && [ -z "${checktask}" ] && echo 'breaking out of acqs, this series does not match ${t}' && break
-				# Add this file to the list of dicoms to fetch
-				dicomlist+=("${acq}")
-				echo -e "${metadata}"
-			done
+			echo -e "\t▶️  $(ls -ld ${ser}/*.ACQ | awk '{print $NF}' | wc -l) Acqusitions Collected for $(basename ${ser})"
+			# Move to dicoms dir (dicom_hdr only works when you are in parent dir)
+			cd "${ser}/1.ACQ"
+			# Read the dicom header.. most importantly return subject and series names
+			fetchdicom_parsedcmheader 
+			# Break out of loop if this is not the right subject
+			[ "${subject}" != "${s}" ] && break
+			# Break out of loop if this series does not match subject
+			[ ! -z "${t}" ] && checktask=$(echo ${seriesname} | grep ${t}) && [ -z "${checktask}" ] && echo 'breaking out of acqs, this series does not match ${t}' && break
+			# Add this file to the list of dicoms to fetch
+			dicomlist+=("$(ls $ser/*.ACQ/*.IMA | awk '{print $NF}')")
+			echo -e "${metadata}"
 		done
 		[ "${subject}" = "${s}" ] && echo 'found our sub.. breaking out of sessions' && echo $stu && break
 	done
