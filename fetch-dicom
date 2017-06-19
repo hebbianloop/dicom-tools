@@ -136,6 +136,8 @@ function fetchdicom_parseoptions(){
 function fetchdicom_dependencies(){
 	# Check for AFNI
 	[ -z "$(which dicom_hdr)" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  AFNI does not appear to be properly installed.. exiting..." && exit
+	# Check for GNU Parallel
+	[ -z "$(which parallel)" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  GNU parallel does not appear to be properly installed.. exiting..." && exit
 }
 # Define Function
 ## Check if subject data exists
@@ -146,125 +148,173 @@ function fetchdicom_checkdataexists(){
 	[ ! -d "${r}/${y}/${m}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Month ${m}.. exiting..." && exit
 	[ ! -d "${r}/${y}/${m}/${d}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Day ${y}-${m}-${d}.. exiting..." && exit
 	# check for existence of sessions on this day
-	local studies=$(ls -ld ${r}/${y}/${m}/${d}/*.STU | awk '{print $8}')
+	local studies=$(ls -ld ${r}/${y}/${m}/${d}/*.STU | awk '{print $NF}')
 	[ -z "${studies}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  No Studies Exist on ${y}-${m}-${d} (directory is empty)... exiting.." && exit
 }
+# Define Function
+## 
 function fetchdicom_parsedcmheader(){
+	# Takes path to dicom file as input and cds to dicom file directory (dicom_hdr only works if dicom file is in cwd)
+	cd "${1}/1.ACQ"
 	# No need to loop through .IMAs.. just grab meta data from first file in list
 	local dicomfile=$(ls -dl *.IMA | tail -n +1 | head -1 | awk '{print $NF}')
 	# Get Subject Name
 	subject=$(dicom_hdr $dicomfile | grep 'Patient Name' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	# Break Out of Loop Over Acquistions If They Aren't For the Desired Subject
-	if [ "${subject}" != "${s}" ]; then
-		break
-	else
-		echo -e "\n 🗣  DICOMS Found for Subject ${s} :: ${stu}"
-		# Get Series Name
-		seriesname=$(dicom_hdr $dicomfile | grep 'ID Series Description' | sed 's/.*\[.*\/\/\(.*\)/\1/')				
-		[ -z ${private} ] && local age=$(dicom_hdr $dicomfile | grep 'Patient Age' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		[ -z ${private} ] && local sex=$(dicom_hdr $dicomfile | grep 'Patient Sex' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		[ -z ${private} ] && local wgt=$(dicom_hdr $dicomfile | grep 'Patient Weight' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		# Get PI Name
-		local piname=$(dicom_hdr $dicomfile | grep 'ID Study Description' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local hardware=$(dicom_hdr $dicomfile | grep 'ID Manufacturer Model Name' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local manufacturer=$(dicom_hdr $dicomfile | grep 'ID Manufacturer' | sed 's/.*\[.*\/\/\(.*\)/\1/') && manufacturer=$(echo ${manufacturer})
-		# Get Date & time
-		local scandate=$(dicom_hdr $dicomfile | grep 'ID Image Date' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local sesstime=$(dicom_hdr $dicomfile | grep 'PRC PPS Start Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local scantime=$(dicom_hdr $dicomfile | grep 'ID Image Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		# Get Information About Sequence Acquisition
-		local seqname=$(dicom_hdr $dicomfile | grep 'ACQ Sequence Name' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local thk=$(dicom_hdr $dicomfile | grep 'ACQ Slice Thickness' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local rt=$(dicom_hdr $dicomfile | grep 'ACQ Repetition Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local et=$(dicom_hdr $dicomfile | grep 'ACQ Echo Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local imgf=$(dicom_hdr $dicomfile | grep 'ACQ Imaging Frequency' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local imgnuc=$(dicom_hdr $dicomfile | grep 'ACQ Imaged Nucleus' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local echnum=$(dicom_hdr $dicomfile | grep 'ACQ Echo Number' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local tesla=$(dicom_hdr $dicomfile | grep 'ACQ Magnetic Field Strength' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local slcspacing=$(dicom_hdr $dicomfile | grep 'ACQ Spacing Between Slices' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local phaseencstps=$(dicom_hdr $dicomfile | grep 'ACQ Number of Phase Encoding Steps' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local echtrl=$(dicom_hdr $dicomfile | grep 'ACQ Echo Train Length' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local persamp=$(dicom_hdr $dicomfile | grep 'ACQ Percent Sampling' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local perfov=$(dicom_hdr $dicomfile | grep 'ACQ Percent Phase Field of View' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local phzencd=$(dicom_hdr $dicomfile | grep 'ACQ Phase Encoding Direction' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local flipang=$(dicom_hdr $dicomfile | grep 'ACQ Flip Angle' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-		local vers=$(dicom_hdr $dicomfile | grep 'ACQ Software Version' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	fi
+	# Get Series Name
+	seriesname=$(dicom_hdr $dicomfile | grep 'ID Series Description' | sed 's/.*\[.*\/\/\(.*\)/\1/')				
+	# Get Subject Information Unless Private Information is Censored
+	[ -z ${private} ] && local age=$(dicom_hdr $dicomfile | grep 'Patient Age' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	[ -z ${private} ] && local sex=$(dicom_hdr $dicomfile | grep 'Patient Sex' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	[ -z ${private} ] && local wgt=$(dicom_hdr $dicomfile | grep 'Patient Weight' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	# Get PI Name
+	local piname=$(dicom_hdr $dicomfile | grep 'ID Study Description' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	# Get Type of Scanner
+	local hardware=$(dicom_hdr $dicomfile | grep 'ID Manufacturer Model Name' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local manufacturer=$(dicom_hdr $dicomfile | grep 'ID Manufacturer' | sed 's/.*\[.*\/\/\(.*\)/\1/') && manufacturer=$(echo ${manufacturer}) #<--uhh wut?
+	# Get Date & time
+	local scandate=$(dicom_hdr $dicomfile | grep 'ID Image Date' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local sesstime=$(dicom_hdr $dicomfile | grep 'PRC PPS Start Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local scantime=$(dicom_hdr $dicomfile | grep 'ID Image Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	# Get Information About Sequence Acquisition
+	local studydesc=$(dicom_hdr $dicomfile | grep 'ID Study Description' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local seqname=$(dicom_hdr $dicomfile | grep 'ACQ Sequence Name' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local thk=$(dicom_hdr $dicomfile | grep 'ACQ Slice Thickness' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local rt=$(dicom_hdr $dicomfile | grep 'ACQ Repetition Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local et=$(dicom_hdr $dicomfile | grep 'ACQ Echo Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local inversiontime=$(dicom_hdr $dicomfile | grep 'ACQ Inversion Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local imgf=$(dicom_hdr $dicomfile | grep 'ACQ Imaging Frequency' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local imgnuc=$(dicom_hdr $dicomfile | grep 'ACQ Imaged Nucleus' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local echnum=$(dicom_hdr $dicomfile | grep 'ACQ Echo Number' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local tesla=$(dicom_hdr $dicomfile | grep 'ACQ Magnetic Field Strength' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local slcspacing=$(dicom_hdr $dicomfile | grep 'ACQ Spacing Between Slices' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local phaseencstps=$(dicom_hdr $dicomfile | grep 'ACQ Number of Phase Encoding Steps' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local echtrl=$(dicom_hdr $dicomfile | grep 'ACQ Echo Train Length' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local persamp=$(dicom_hdr $dicomfile | grep 'ACQ Percent Sampling' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local perfov=$(dicom_hdr $dicomfile | grep 'ACQ Percent Phase Field of View' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local phzencd=$(dicom_hdr $dicomfile | grep 'ACQ Phase Encoding Direction' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local flipang=$(dicom_hdr $dicomfile | grep 'ACQ Flip Angle' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local sar=$(dicom_hdr $dicomfile | grep 'ACQ SAR' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local soundb=$(dicom_hdr $dicomfile | grep 'ACQ DB' | sed 's/.*\[.*\/\/\(.*\)/\1/')
+	local vers=$(dicom_hdr $dicomfile | grep 'ACQ Software Version' | sed 's/.*\[.*\/\/\(.*\)/\1/')
 	# Create Text
-	metadata=$(cat <<-EOF
-	--------------------------------------------------------------------------------------
-	PI\t\t\t${piname##PI\'s^}
-	
-	Subject ID\t\t${subject}
-	Age\t\t\t${age}
-	Sex\t\t\t${sex}
-	Weight(kg)\t\t${wgt}
-	
-	Scan Date\t\t${scandate}
-	Session Start Time\t${sesstime}
-
-	Sequence Description\t${seriesname}
-	Sequence Start Time\t${scantime}
-	
-	Acquisition Hardware -- ${manufacturer}
-	Acquisition Software -- ${vers}
-	--------------------------------------------------------------------------------------
-	Internal Sequence Name\t\t${seqname}
-	\nScanning Parameters ::
-
-	\tMagnetic Field Str\t${tesla}T
-	\tRepetition Time\t\t${rt} ms
-	\tEcho Time\t\t${et} ms
-	\tEcho Number\t\t${echnum}
-	\tEcho Train Length\t${echtrl}
-	\tPercent Sampling\t${persamp}%
-
-	\tFlip Angle\t\t${flipang} deg
-	\tPhase Encoding\t\t${phzencd}
-	\tPhase Encoding Steps\t${phaseencstps}
-	\tPercent Phase FOV\t${perfov}%
-
-	\tSlice Thickness\t\t${thk}mm
-	\tSlice Spacing\t\t${slcspacing}mm
-
-	\tImaging Frequency\t${imgf}Hz
-	\tImaging Atom\t\t${imgnuc}
-
-	--------------------------------------------------------------------------------------
-	This file was generated on $(date) by $(whoami)@$(hostname)\n
-	EOF)	
+	metadatum=$(cat <<-EOF
+--------------------------------------------------------------------------------------\n
+Fetching Dicom Series ::\n
+${ser}\n
+PI\t\t\t${piname##PI\'s^}\n
+Study Description\t${studydesc}\n
+Scan Date\t\t${scandate}\n
+Session Start Time\t${sesstime}\n
+\n
+Subject ID\t\t${subject}\n
+Age\t\t\t${age}\n
+Sex\t\t\t${sex}\n
+Weight(kg)\t\t${wgt}\n
+\n
+Sequence Description\t${seriesname}\n
+Sequence Start Time\t${scantime}\n
+\n
+Acquisition Hardware -- ${manufacturer}\n
+Acquisition Software -- ${vers}\n
+--------------------------------------------------------------------------------------\n
+Internal Sequence Name\t\t${seqname}\n
+Scanning Parameters ::\n
+\n
+\tMagnetic Field Str\t${tesla}T\n
+\tRepetition Time\t\t${rt} ms\n
+\tEcho Time\t\t${et} ms\n
+\tInversion Time\t\t${inversiontime} ms\n
+\tEcho Number\t\t${echnum}\n
+\tEcho Train Length\t${echtrl}\n
+\tPercent Sampling\t${persamp} %\n
+\n
+\tFlip Angle\t\t${flipang} deg\n
+\tPhase Encoding\t\t${phzencd}\n
+\tPhase Encoding Steps\t${phaseencstps}\n
+\tPercent Phase FOV\t${perfov}%\n
+\n
+\tSlice Thickness\t\t${thk}mm\n
+\tSlice Spacing\t\t${slcspacing}mm\n
+\n
+\tImaging Frequency\t${imgf}Hz\n
+\tImaging Atom\t\t${imgnuc}\n
+\n
+Patient Safety ::\n
+\tSAR\t\t${sar}\n
+\tSound (dB)\t\t${soundb}\n
+--------------------------------------------------------------------------------------\n
+This file was generated on $(date) by $(whoami)@$(hostname)\n;
+EOF)	
+## Print metadatum out to be captured as output from parallel
+echo ${metadatum}
+#
+#
+#end function
 }
+# Export Function for Parallelization
+export -f fetchdicom_parsedcmheader
+##
+# Define Function 
+## Retrieve Meta Data About Studies on This Day
+function fetchdicom_parsestudies(){
+	# array of studies (full path to each study)
+	studies_array=()
+	# array of series (equals -> num studies * (num series study 1 + num series study 2 + .. num series study N) )
+	series_array=()
+	# keep list of number of series for each study, number of series per study are counted in the for loop
+	numseries_array=()		
+	# list of meta data for each acquired series (i.e MoCo, Localizer, MPRAGE, rest, etc.)
+	metadata_array=()
+	# make array of studies and count number of eleements
+	studies_array=($(ls -ld ${r}/${y}/${m}/${d}/*.STU | awk '{print $NF}')) && numstudies=${#studyarray[*]}
+	# index for loop
+	study_index=0
+	# Begin loop over studies
+	while [ "${study_index}" -lt "${numstudies}" ]; do
+		# build an indexed array of studies
+		series_array+=($(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}')) # ${studies_array[study_index]} works because it's within ${ ... } brackets.
+		# how many series are in each study? build an array we can index by study number (in alphanumeric order)
+		numseries_array+=("$(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}' | wc -l) ")
+		# what are the total number of series that have been added to the series array thus far? use this with number of series in each study to only get series belonging to study number.. simple subtraction yo!
+		series_array_size=$(echo ${#series_array[*]})
+		# what is the current position in the series array? i.e. how many series in this study (use with series_array_size to get index for series belonging just to the study in the current loop cycle)
+		numseries_in_this_study=${numseries_array[*]:study_index}
+		# some debugging information
+		echo "study # ${study_index} : ${studies_array[study_index]}"
+		echo "${numseries_array[study_index]} series acquired: "
+		printf '\t%s\n' "${series_array[@]:series_array_size-numseries_in_this_study}"
+		echo ''
+		# now that we have a list of series belonging to the study, let's loop across them in parallel and fetch their metadata
+		# -- capture output of fetchdicom_parsedcmheader as an array
+		capture_output=$(parallel fetchdicom_parsedcmheader {} ::: ${series_array[*]:series_array_size-numseries_in_this_study})
+		# -- in order to add each set of metadata as an array we must modify the default field seperator to something that specifies a delimitation between each entry
+		SAVEIFS=${IFS} && IFS=$';' && metadata_array+=(${capture_output}) && IFS=${SAVEIFS}
+		((study_index++))
+	done
+#
+# end function
+}
+
 # Define Function
 ## Parse Meta-Data
 function fetchdicom_dataseek(){
 	# Define the list of files to extract
 	dicomlist=()
-	echo -e "🗒  $( ls -ld ${r}/${y}/${m}/${d}/*.STU | awk '{print $NF}' | wc -l) Studies Found on $y-$m-$d"
-	# Loop Across All Studies on This Day
-	for stu in $(ls -ld ${r}/${y}/${m}/${d}/*.STU | awk '{print $NF}'); do
-		echo -e "\t▶️  $(ls -ld ${stu}/*.SER | awk '{print $NF}' | wc -l) Sequences Collected for $(basename ${stu})"
-		# Loop Across All Series Protocols (Different Types of Scans)
-		for ser in $(ls -ld ${stu}/*.SER | awk '{print $NF}'); do
-			echo -e "\t▶️  $(ls -ld ${ser}/*.ACQ | awk '{print $NF}' | wc -l) Acqusitions Collected for $(basename ${ser})"
-			# Move to dicoms dir (dicom_hdr only works when you are in parent dir)
-			cd "${ser}/1.ACQ"
-			# Read the dicom header.. most importantly return subject and series names
-			fetchdicom_parsedcmheader 
-			# Break out of loop if this is not the right subject
-			[ "${subject}" != "${s}" ] && break
-			# Break out of loop if this series does not match subject
-			[ ! -z "${t}" ] && checktask=$(echo ${seriesname} | grep ${t}) && [ -z "${checktask}" ] && echo 'breaking out of acqs, this series does not match ${t}' && break
-			# Add this file to the list of dicoms to fetch
-			dicomlist+=("$(ls $ser/*.ACQ/*.IMA | awk '{print $NF}')")
-			echo -e "${metadata}"
-		done
-		[ "${subject}" = "${s}" ] && echo 'found our sub.. breaking out of sessions' && echo $stu && break
-	done
-	cd ${stu}/..
+	# Parse the Studies on Given Date
+	fetchdicom_parsestudies
+	echo -e "🗒  ${numstudies} Studies Found on $y-$m-$d" # print number of studies found on this date
+	# get list of subjects
+	subjects=(echo ${metadata_array[*]} | grep -oe 'Subject ID\\t\\t\w*' | uniq | grep -o '[^Subject ID\\t\\t].*')
+	
+	# get list of series acquired for each subject
+	## retrieve selected data
+	##
+	##
 	echo 'The following files will be extracted :: '
 	echo "${dicomlist[@]}"
 }
-
+# Define Function
+## Run sequence of functions for getting data
 function fetchdicom_run(){
 	# Parse Options
 	fetchdicom_parseoptions "$@"
