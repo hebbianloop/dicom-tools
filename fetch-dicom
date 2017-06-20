@@ -257,20 +257,18 @@ export -f fetchdicom_parsedcmheader
 # Define Function 
 ## Retrieve Meta Data About Studies on This Day
 function fetchdicom_parsestudies(){
-	# array of studies (full path to each study)
-	studies_array=()
 	# array of series (equals -> num studies * (num series study 1 + num series study 2 + .. num series study N) )
 	series_array=()
 	# keep list of number of series for each study, number of series per study are counted in the for loop
 	numseries_array=()		
 	# list of meta data for each acquired series (i.e MoCo, Localizer, MPRAGE, rest, etc.)
 	metadata_array=()
-	# make array of studies and count number of eleements
-	studies_array=($(ls -ld ${r}/${y}/${m}/${d}/*.STU | awk '{print $NF}')) && numstudies=${#studyarray[*]}
 	# index for loop
 	study_index=0
+	printf "Parsing Metadata for Studies Performed on ${y}-${m}-${d}"
 	# Begin loop over studies
 	while [ "${study_index}" -lt "${numstudies}" ]; do
+		echo -n '.'
 		# build an indexed array of studies
 		series_array+=($(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}')) # ${studies_array[study_index]} works because it's within ${ ... } brackets.
 		# how many series are in each study? build an array we can index by study number (in alphanumeric order)
@@ -279,40 +277,82 @@ function fetchdicom_parsestudies(){
 		series_array_size=$(echo ${#series_array[*]})
 		# what is the current position in the series array? i.e. how many series in this study (use with series_array_size to get index for series belonging just to the study in the current loop cycle)
 		numseries_in_this_study=${numseries_array[*]:study_index}
-		# some debugging information
-		echo "study # ${study_index} : ${studies_array[study_index]}"
-		echo "${numseries_array[study_index]} series acquired: "
-		printf '\t%s\n' "${series_array[@]:series_array_size-numseries_in_this_study}"
-		echo ''
 		# now that we have a list of series belonging to the study, let's loop across them in parallel and fetch their metadata
 		# -- capture output of fetchdicom_parsedcmheader as an array
-		capture_output=$(parallel fetchdicom_parsedcmheader {} ::: ${series_array[*]:series_array_size-numseries_in_this_study})
+		## TODO ;; optimize parallel
+		capture_output=$(parallel -k fetchdicom_parsedcmheader {} ::: ${series_array[*]:series_array_size-numseries_in_this_study})
 		# -- in order to add each set of metadata as an array we must modify the default field seperator to something that specifies a delimitation between each entry
-		SAVEIFS=${IFS} && IFS=$';' && metadata_array+=(${capture_output}) && IFS=${SAVEIFS}
+		local SAVEIFS=${IFS} && local IFS=$';' && metadata_array+=(${capture_output}) && local IFS=${SAVEIFS}
 		((study_index++))
 	done
 #
 # end function
 }
-
+# Define Function
+## Retrieve & Format Meta Data for Study
+function fetchdicom_parsestudy(){
+	local study="${stu}" 
+	# capture series
+	local series=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Sequence Description//p')
+	# capture age
+	local age=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Age//p' | uniq)
+	# capture sex
+	local sex=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Sex//p' | uniq)
+	# capture weight
+	local weight=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Weight(kg)//p' | uniq)
+	# capture PI
+	local PI=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n "s/PI's^//p" | uniq | sed "s/Study Description//")
+	# capture session time
+	local sessionstarttime=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n "s/Session Start Time//p" | uniq | sed 's/\..*//' | sed 's/.\{4\}/&:/; s/.\{7\}/&:/')
+	[ -z "${PI}" ] && PI="<unknown>"
+local subject_info=$(cat <<-EOF
+\n
+♔ Study PI: ${PI}\n
+✎ SID: ${subjects[study_index]}\n
+✎ Age:${age}\n
+✎ Sex:${sex}\n
+✎ Wgt:${weight}\n
+✎ Series (In Order Acquired)  ‣  Session Start Time: ${sessionstarttime}
+EOF)
+echo -e ${subject_info}
+echo "${series}" | nl
+}
 # Define Function
 ## Parse Meta-Data
 function fetchdicom_dataseek(){
-	# Define the list of files to extract
-	dicomlist=()
+	# make array of studies and count number of eleements
+	studies_array=($(ls -ld ${r}/${y}/${m}/${d}/*.STU | awk '{print $NF}')) && numstudies=${#studies_array[*]}
 	# Parse the Studies on Given Date
 	fetchdicom_parsestudies
-	echo -e "🗒  ${numstudies} Studies Found on $y-$m-$d" # print number of studies found on this date
-	# get list of subjects
-	subjects=(echo ${metadata_array[*]} | grep -oe 'Subject ID\\t\\t\w*' | uniq | grep -o '[^Subject ID\\t\\t].*')
-	
+	echo -e "🗒  ${numstudies} Studies Found" # print number of studies found on this date
+	# get list of subjects acquired on this day
+	subjects=($(echo -e ${metadata_array[*]} | grep 'Subject ID' | uniq | awk '{print $NF}'))
+	# cross reference subject list with the subject you are looking for
+	#if [ ! -z "${s}" ]; then
+	#	for sub in "${subjects[*]}"; do
+	#		[ "${sub}" = "${sub}" ] && echo 
+	#	done
+	#else
+		# index for loop
+		study_index=0
+		# running total of num series elapsed (used to index metadata array)
+		running_total=0
+	#fi
+	# loop over studies	
+	for stu in ${studies_array[*]}; do
+		fetchdicom_parsestudy ${stu} # would be great to keep variables local and pass as arguments (need to figure out arrays)
+		((running_total+=${numseries_array[study_index]}))
+		((study_index++))
+	done
+	# capture series files
+	series_files=(${series_array[*]:running_total:numseries_array[study_index]})
 	# get list of series acquired for each subject
 	## retrieve selected data
 	##
 	##
-	echo 'The following files will be extracted :: '
-	echo "${dicomlist[@]}"
 }
+# Define Function
+
 # Define Function
 ## Run sequence of functions for getting data
 function fetchdicom_run(){
