@@ -1,6 +1,8 @@
 #!/bin/bash
 # Extract a Single Subject's DICOM from CFMI File-Systems 
 
+## TODO -- make it a single date input and parse the date into yyyy/mm/dd
+
 # Default Arguments
 ## Output Data Here
 o=$(pwd)
@@ -142,6 +144,7 @@ function fetchdicom_dependencies(){
 # Define Function
 ## Check if subject data exists
 function fetchdicom_checkdataexists(){
+	[ ! -z "${s}" ] && echo -e "\n🔍  Searching DICOM Database for Subject ID: ${s}\n"		
 	# Check if raw data directory exists
 	[ ! -d "${r}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Directory (${r}) Cannot be Found.. exiting..." && exit
 	[ ! -d "${r}/${y}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Year ${y}.. exiting..." && exit
@@ -319,44 +322,64 @@ echo -e ${subject_info}
 echo "${series}" | nl
 }
 # Define Function
+## Select Desired Series
+function fetchdicom_selectseries(){
+	echo 'work in progress'
+}
+# Define Function
+## Copy Data in Parallel
+function fetchdicom_copydata(){
+	# get name of desired series (this should be an input from fetchdicom_selectseries )
+	## note how all leading tabs, trailing spaces and commas are removed and replaced with underscores.. numers are prepended to indicate order and prevent merging
+	series=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Sequence Description//p' | nl | awk '{$1=$1};1' | tr -s ',' ' ' | tr -s ' ' '_')
+	# first create folders
+	parallel -k mkdir -p "${o}"/"${s}"/"{}" ::: "${series}"
+	# now copy all series into correct folder
+	parallel -k --link --bar cp -r "{1}/* ${o}/${s}/{2}/" ::: "${series_files[@]}" ::: "${series}"
+}
+# Define Function
 ## Parse Meta-Data
 function fetchdicom_dataseek(){
 	# make array of studies and count number of eleements
 	studies_array=($(ls -ld ${r}/${y}/${m}/${d}/*.STU | awk '{print $NF}')) && numstudies=${#studies_array[*]}
 	# Parse the Studies on Given Date
 	fetchdicom_parsestudies
-	echo -e "🗒  ${numstudies} Studies Found" # print number of studies found on this date
+	echo -e "🗒  ${numstudies} Studies Found..." # print number of studies found on this date
 	# get list of subjects acquired on this day
 	subjects=($(echo -e ${metadata_array[*]} | grep 'Subject ID' | uniq | awk '{print $NF}'))
-	# cross reference subject list with the subject you are looking for
 	# index for loop
 	study_index=0
 	# running total of num series elapsed (used to index metadata array)
 	running_total=0	
-	if [ ! -z "${s}" ]; then
-		# loop over subjects and find indices
-		for sub in "${subjects[*]}"; do
-			[ "${s}" = "${sub}" ] && echo 
-			((running_total+=${numseries_array[study_index]}))			
-			((study_index++))
-		done
-	else
-		# loop over studies	
-		for stu in ${studies_array[*]}; do
+	# print all subjects scanned on this date if no specific subject is input
+	if [ -z "${s}" ]; then
+		# loop over studies	and print information
+		for stu in "${studies_array[@]}"; do # need to use @ instead of * to get delimited output (each sub as opposed to all subs on one line)
 			fetchdicom_parsestudy ${stu} # would be great to keep variables local and pass as arguments (need to figure out arrays)
 			((running_total+=${numseries_array[study_index]}))
 			((study_index++))
-		done		
+		done
+		# index for loop
+		study_index=0 && running_total=0				
+	fi		
+	# cross reference subject list with the subject you are looking for	
+	if [ ! -z "${s}" ]; then
+		# loop over subjects and find indices
+		## TODO - add ability to select specific series (use enumeration)
+		for sub in "${subjects[@]}"; do
+			if [ "${s}" = "${sub}" ]; then
+				### TODO make this part cleaner.. so that information about subject is printed
+				fetchdicom_parsestudy && series_files=(${series_array[*]:running_total:numseries_array[study_index]}) && fetchdicom_copydata && flag='subjectfound'
+				break
+			fi
+			((running_total+=${numseries_array[study_index]}))			
+			((study_index++))
+		done	
+		[ -z "${flag}" ] && echo "ERROR SUBJECT NOT FOUND ON ${y}-${m}-${d}" && exit
 	fi
-	# capture series files
-	series_files=(${series_array[*]:running_total:numseries_array[study_index]})
-	# get list of series acquired for each subject
-	## retrieve selected data
 	##
 	##
 }
-# Define Function
-
 # Define Function
 ## Run sequence of functions for getting data
 function fetchdicom_run(){
@@ -371,5 +394,5 @@ function fetchdicom_run(){
 }
 # Redirect all standard input ($@) to run function and execute program
 fetchdicom_run "$@"
-
-
+#
+##
