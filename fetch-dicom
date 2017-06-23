@@ -309,6 +309,7 @@ local subject_info=$(cat <<-EOF
 \n
 ♔ Study PI: ${PI}\n
 ✎ SID: ${subjects[study_index]}\n
+
 ✎ Age:${age}\n
 ✎ Sex:${sex}\n
 ✎ Wgt:${weight}\n
@@ -328,22 +329,25 @@ function fetchdicom_dataseek(){
 	# get list of subjects acquired on this day
 	subjects=($(echo -e ${metadata_array[*]} | grep 'Subject ID' | uniq | awk '{print $NF}'))
 	# cross reference subject list with the subject you are looking for
-	#if [ ! -z "${s}" ]; then
-	#	for sub in "${subjects[*]}"; do
-	#		[ "${sub}" = "${sub}" ] && echo 
-	#	done
-	#else
-		# index for loop
-		study_index=0
-		# running total of num series elapsed (used to index metadata array)
-		running_total=0
-	#fi
-	# loop over studies	
-	for stu in ${studies_array[*]}; do
-		fetchdicom_parsestudy ${stu} # would be great to keep variables local and pass as arguments (need to figure out arrays)
-		((running_total+=${numseries_array[study_index]}))
-		((study_index++))
-	done
+	# index for loop
+	study_index=0
+	# running total of num series elapsed (used to index metadata array)
+	running_total=0	
+	if [ ! -z "${s}" ]; then
+		# loop over subjects and find indices
+		for sub in "${subjects[*]}"; do
+			[ "${s}" = "${sub}" ] && echo 
+			((running_total+=${numseries_array[study_index]}))			
+			((study_index++))
+		done
+	else
+		# loop over studies	
+		for stu in ${studies_array[*]}; do
+			fetchdicom_parsestudy ${stu} # would be great to keep variables local and pass as arguments (need to figure out arrays)
+			((running_total+=${numseries_array[study_index]}))
+			((study_index++))
+		done		
+	fi
 	# capture series files
 	series_files=(${series_array[*]:running_total:numseries_array[study_index]})
 	# get list of series acquired for each subject
