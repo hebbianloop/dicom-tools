@@ -158,7 +158,7 @@ function fetchdicom_checkdataexists(){
 ## 
 function fetchdicom_parsedcmheader(){
 	# Takes path to dicom file as input and cds to dicom file directory (dicom_hdr only works if dicom file is in cwd)
-	cd "${1}/1.ACQ"
+	cd "${1}/1.*"
 	# No need to loop through .IMAs.. just grab meta data from first file in list
 	local dicomfile=$(ls -dl *.IMA | tail -n +1 | head -1 | awk '{print $NF}')
 	# Get Subject Name
