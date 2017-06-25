@@ -158,7 +158,9 @@ function fetchdicom_checkdataexists(){
 ## 
 function fetchdicom_parsedcmheader(){
 	# Takes path to dicom file as input and cds to dicom file directory (dicom_hdr only works if dicom file is in cwd)
-	cd "${1}/1.*"
+	## TODO - make this just take the first folder in the list
+	acqs=$(ls -dl ${1}/* | tail -n +1 | head -1 | awk '{print $NF}')
+	cd "${acqs}"
 	# No need to loop through .IMAs.. just grab meta data from first file in list
 	local dicomfile=$(ls -dl *.IMA | tail -n +1 | head -1 | awk '{print $NF}')
 	# Get Subject Name
@@ -335,6 +337,7 @@ function fetchdicom_copydata(){
 	# first create folders
 	parallel -k mkdir -p "${o}"/"${s}"/"{}" ::: "${series}"
 	# now copy all series into correct folder
+	## TODO :: add functionality for session
 	parallel -k --link --bar cp -r "{1}/* ${o}/${s}/{2}/" ::: "${series_files[@]}" ::: "${series}"
 }
 # Define Function
