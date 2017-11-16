@@ -9,11 +9,11 @@ o=$(pwd)
 ## Raw Data Directory Here (should be directory with ./years/mos/days)
 r=${CFMIDICOMDIR}
 ## Subject Name
-s='453604'
+s=''
 ## Subject Scan Date
-y='2016'
-m='04'
-d='04'
+y=''
+m=''
+d=''
 ## Extract Specific Sequence?
 t=''
 ## Exclude subject identifiers?
@@ -45,8 +45,8 @@ function fetchdicom_help(){
 	Other Arguments
 		  \t-h  --help\t\t\tdisplays this message\n\n
 
-
-	EOF)
+EOF
+	       )
 	echo -e "${helpstr}"
 }
 # Define Function
@@ -144,14 +144,20 @@ function fetchdicom_dependencies(){
 # Define Function
 ## Check if subject data exists
 function fetchdicom_checkdataexists(){
+    [ -z "${y}" ] && local year="${r}"
+    [ "${y}}" ] && local year="${r}/${y}"
+    [ -z "${m}" ] && local month="${r}"
+    [ "${m}" ] && local month="${r}/${y}/${m}"
+    [ -z "${d}" ] && local day="${r}"
+    [ "${d}" ] && local day="${r}/${y}/${m}/${d}"
 	[ ! -z "${s}" ] && echo -e "\n🔍  Searching DICOM Database for Subject ID: ${s}\n"		
 	# Check if raw data directory exists
 	[ ! -d "${r}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Directory (${r}) Cannot be Found.. exiting..." && exit
-	[ ! -d "${r}/${y}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Year ${y}.. exiting..." && exit
-	[ ! -d "${r}/${y}/${m}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Month ${m}.. exiting..." && exit
-	[ ! -d "${r}/${y}/${m}/${d}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Day ${y}-${m}-${d}.. exiting..." && exit
+	[ ! -d "${year}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Year ${y}.. exiting..." && exit
+	[ ! -d "${month}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Month ${m}.. exiting..." && exit
+	[ ! -d "${day}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Day ${y}-${m}-${d}.. exiting..." && exit
 	# check for existence of sessions on this day
-	local studies=$(ls -ld ${r}/${y}/${m}/${d}/*.STU | awk '{print $NF}')
+	studies=$(ls -ld ${day}/*/*.STU | awk '{print $NF}')
 	[ -z "${studies}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  No Studies Exist on ${y}-${m}-${d} (directory is empty)... exiting.." && exit
 }
 # Define Function
@@ -249,7 +255,8 @@ Patient Safety ::\n
 \tSound (dB)\t\t${soundb}\n
 --------------------------------------------------------------------------------------\n
 This file was generated on $(date) by $(whoami)@$(hostname)\n;
-EOF)	
+EOF
+		 )	
 ## Print metadatum out to be captured as output from parallel
 echo ${metadatum}
 #
@@ -319,7 +326,8 @@ local subject_info=$(cat <<-EOF
 ✎ Sex:${sex}\n
 ✎ Wgt:${weight}\n
 ✎ Series (In Order Acquired)  ‣  Session Start Time: ${sessionstarttime}
-EOF)
+EOF
+      )
 echo -e ${subject_info}
 echo "${series}" | nl
 }
@@ -344,7 +352,7 @@ function fetchdicom_copydata(){
 ## Parse Meta-Data
 function fetchdicom_dataseek(){
 	# make array of studies and count number of eleements
-	studies_array=($(ls -ld ${r}/${y}/${m}/${d}/*.STU | awk '{print $NF}')) && numstudies=${#studies_array[*]}
+	studies_array=($(ls -ld ${studies} | awk '{print $NF}')) && numstudies=${#studies_array[*]}
 	# Parse the Studies on Given Date
 	fetchdicom_parsestudies
 	echo -e "🗒  ${numstudies} Studies Found..." # print number of studies found on this date
@@ -356,6 +364,7 @@ function fetchdicom_dataseek(){
 	running_total=0	
 	# print all subjects scanned on this date if no specific subject is input
 	if [ -z "${s}" ]; then
+	    echo 'Printing List of Subjects Scanned on This Day'
 		# loop over studies	and print information
 		for stu in "${studies_array[@]}"; do # need to use @ instead of * to get delimited output (each sub as opposed to all subs on one line)
 			fetchdicom_parsestudy ${stu} # would be great to keep variables local and pass as arguments (need to figure out arrays)
