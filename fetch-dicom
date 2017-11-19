@@ -144,14 +144,18 @@ function fetchdicom_dependencies(){
 # Define Function
 ## Check if subject data exists
 function fetchdicom_checkdataexists(){
+	# Assume you are in the root date directory if date is not input
     [ -z "${y}" ] && local year="${r}"
-    [ "${y}}" ] && local year="${r}/${y}"
     [ -z "${m}" ] && local month="${r}"
-    [ "${m}" ] && local month="${r}/${y}/${m}"
     [ -z "${d}" ] && local day="${r}"
+    # Otherwise build paths to raw data by date
+    [ "${y}" ] && local year="${r}/${y}"
+    [ "${m}" ] && local month="${r}/${y}/${m}"
     [ "${d}" ] && local day="${r}/${y}/${m}/${d}"
+    # Search for input subject
+    # TODO what if there is no input subject?
 	[ ! -z "${s}" ] && echo -e "\n🔍  Searching DICOM Database for Subject ID: ${s}\n"		
-	# Check if raw data directory exists
+	# Check if raw data directory exists, if individual years, months and days also exist (if input)
 	[ ! -d "${r}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Directory (${r}) Cannot be Found.. exiting..." && exit
 	[ ! -d "${year}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Year ${y}.. exiting..." && exit
 	[ ! -d "${month}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Month ${m}.. exiting..." && exit
@@ -303,6 +307,7 @@ function fetchdicom_parsestudies(){
 # Define Function
 ## Retrieve & Format Meta Data for Study
 function fetchdicom_parsestudy(){
+	echo testing: ${stu}
 	local study="${stu}" 
 	# capture series
 	local series=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Sequence Description//p')
@@ -387,7 +392,7 @@ function fetchdicom_dataseek(){
 			((running_total+=${numseries_array[study_index]}))			
 			((study_index++))
 		done	
-		[ -z "${flag}" ] && echo "ERROR SUBJECT NOT FOUND ON ${y}-${m}-${d}" && exit
+		#[ -z "${flag}" ] && echo "ERROR SUBJECT NOT FOUND ON ${y}-${m}-${d}" && exit
 	fi
 	##
 	##
