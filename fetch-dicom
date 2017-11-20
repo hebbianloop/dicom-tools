@@ -284,10 +284,11 @@ function fetchdicom_parsestudies(){
 	metadata_array=()
 	# index for loop
 	study_index=0
-	printf "Parsing Metadata for Studies Performed on ${y}-${m}-${d}"
+	printf "Parsing Metadata for Studies:\n${studies_array}[@]"
 	# Begin loop over studies
 	while [ "${study_index}" -lt "${numstudies}" ]; do
 		echo -n '.'
+		echo 'test'
 		# check for existence of series in session
 		series=$(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}' | sed "s_149959/__")
 		[ -z "${series}" ] && echo -e "\n -- WARNING -- No Series Exist for Study ${studies_array[study_index]}.. skipping ${studies_array[study_index]}" && break
@@ -313,7 +314,6 @@ function fetchdicom_parsestudies(){
 # Define Function
 ## Retrieve & Format Meta Data for Study
 function fetchdicom_parsestudy(){
-	echo testing: ${stu}
 	local study="${stu}" 
 	# capture series
 	local series=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Sequence Description//p')
