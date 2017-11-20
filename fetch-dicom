@@ -11,9 +11,9 @@ r=${CFMIDICOMDIR}
 ## Subject Name
 s=''
 ## Subject Scan Date
-y=''
-m=''
-d=''
+y='.'
+m='.'
+d='.'
 ## Extract Specific Sequence?
 t=''
 ## Exclude subject identifiers?
