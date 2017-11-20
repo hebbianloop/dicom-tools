@@ -141,19 +141,20 @@ function fetchdicom_dependencies(){
 	# Check for GNU Parallel
 	[ -z "$(which parallel)" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  GNU parallel does not appear to be properly installed.. exiting..." && exit
 }
+function fetchdicom_builddatabase(){
+	# Create a YAML file of raw data hierarchy - root
+	# TODO: show list of PIs, Projects, Subjects & Dates to choose from
+}
 # Define Function
 ## Check if subject data exists
 function fetchdicom_checkdataexists(){
-	# Assume you are in the root date directory if date is not input
-    [ -z "${y}" ] && local year="${r}"
-    [ -z "${m}" ] && local month="${r}"
-    [ -z "${d}" ] && local day="${r}"
-    # Otherwise build paths to raw data by date
+	# Search for DICOM Assuming Date Organized File Hierarchy
     [ "${y}" ] && local year="${r}/${y}"
     [ "${m}" ] && local month="${r}/${y}/${m}"
     [ "${d}" ] && local day="${r}/${y}/${m}/${d}"
     # Search for input subject
     # TODO what if there is no input subject?
+    [ -z "${s}" && echo "Must specify subject ID -- dev TODO: show list of PIs, Projects, Subjects & Dates to choose from"] && fetchdicom_help && exit
 	[ ! -z "${s}" ] && echo -e "\n🔍  Searching DICOM Database for Subject ID: ${s}\n"		
 	# Check if raw data directory exists, if individual years, months and days also exist (if input)
 	[ ! -d "${r}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Directory (${r}) Cannot be Found.. exiting..." && exit
@@ -163,6 +164,8 @@ function fetchdicom_checkdataexists(){
 	# check for existence of sessions on this day
 	studies=$(ls -ld ${day}/*/*.STU | awk '{print $NF}')
 	[ -z "${studies}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  No Studies Exist on ${y}-${m}-${d} (directory is empty)... exiting.." && exit
+	# check for existence of series in session
+	${studies_array[study_index]}/*.SER
 }
 # Define Function
 ## 
@@ -285,6 +288,9 @@ function fetchdicom_parsestudies(){
 	# Begin loop over studies
 	while [ "${study_index}" -lt "${numstudies}" ]; do
 		echo -n '.'
+		# check for existence of series in session
+		series=$(ls -ld 149959/*.SER | awk '{print $NF}' | sed "s_149959/__")
+		[ -z "${series}" ] && echo -e "\n -- WARNING -- No Series Exist for Study ${studies_array[study_index]}.. skipping ${studies_array[study_index]}" && break
 		# build an indexed array of studies
 		series_array+=($(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}')) # ${studies_array[study_index]} works because it's within ${ ... } brackets.
 		# how many series are in each study? build an array we can index by study number (in alphanumeric order)
