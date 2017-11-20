@@ -284,29 +284,34 @@ function fetchdicom_parsestudies(){
 	metadata_array=()
 	# index for loop
 	study_index=0
-	printf "Parsing Metadata for Studies:\n${studies_array}[*]"
+	printf "\t--Parsing Study MetaData"
 	# Begin loop over studies
 	while [ "${study_index}" -lt "${numstudies}" ]; do
 		echo -n '.'
 		echo 'test'
 		# check for existence of series in session
 		series=$(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}' | sed "s_149959/__")
-		[ -z "${series}" ] && echo -e "\n -- WARNING -- No Series Exist for Study ${studies_array[study_index]}.. skipping ${studies_array[study_index]}" && break
-		# build an indexed array of studies
-		series_array+=($(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}')) # ${studies_array[study_index]} works because it's within ${ ... } brackets.
-		# how many series are in each study? build an array we can index by study number (in alphanumeric order)
-		numseries_array+=("$(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}' | wc -l) ")
-		# what are the total number of series that have been added to the series array thus far? use this with number of series in each study to only get series belonging to study number.. simple subtraction yo!
-		series_array_size=$(echo ${#series_array[*]})
-		# what is the current position in the series array? i.e. how many series in this study (use with series_array_size to get index for series belonging just to the study in the current loop cycle)
-		numseries_in_this_study=${numseries_array[*]:study_index}
-		# now that we have a list of series belonging to the study, let's loop across them in parallel and fetch their metadata
-		# -- capture output of fetchdicom_parsedcmheader as an array
-		## TODO ;; optimize parallel
-		capture_output=$(parallel -k fetchdicom_parsedcmheader {} ::: ${series_array[*]:series_array_size-numseries_in_this_study})
-		# -- in order to add each set of metadata as an array we must modify the default field seperator to something that specifies a delimitation between each entry
-		local SAVEIFS=${IFS} && local IFS=$';' && metadata_array+=(${capture_output}) && local IFS=${SAVEIFS}
-		((study_index++))
+		# print to screen
+		echo -e "\t--"${studies_array[study_index]}
+		if [ -z "${series}" ]; then
+			echo -e "\n -- WARNING -- No Series Exist for Study ${studies_array[study_index]}.. skipping ${studies_array[study_index]}"
+		else
+			# build an indexed array of studies
+			series_array+=($(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}')) # ${studies_array[study_index]} works because it's within ${ ... } brackets.
+			# how many series are in each study? build an array we can index by study number (in alphanumeric order)
+			numseries_array+=("$(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}' | wc -l) ")
+			# what are the total number of series that have been added to the series array thus far? use this with number of series in each study to only get series belonging to study number.. simple subtraction yo!
+			series_array_size=$(echo ${#series_array[*]})
+			# what is the current position in the series array? i.e. how many series in this study (use with series_array_size to get index for series belonging just to the study in the current loop cycle)
+			numseries_in_this_study=${numseries_array[*]:study_index}
+			# now that we have a list of series belonging to the study, let's loop across them in parallel and fetch their metadata
+			# -- capture output of fetchdicom_parsedcmheader as an array
+			## TODO ;; optimize parallel
+			capture_output=$(parallel -k fetchdicom_parsedcmheader {} ::: ${series_array[*]:series_array_size-numseries_in_this_study})
+			# -- in order to add each set of metadata as an array we must modify the default field seperator to something that specifies a delimitation between each entry
+			local SAVEIFS=${IFS} && local IFS=$';' && metadata_array+=(${capture_output}) && local IFS=${SAVEIFS}
+			((study_index++))
+		fi
 	done
 #
 # end function
