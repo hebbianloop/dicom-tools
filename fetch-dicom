@@ -144,6 +144,7 @@ function fetchdicom_dependencies(){
 function fetchdicom_builddatabase(){
 	# Create a YAML file of raw data hierarchy - root
 	# TODO: show list of PIs, Projects, Subjects & Dates to choose from
+	echo 'testing'
 }
 # Define Function
 ## Check if subject data exists
