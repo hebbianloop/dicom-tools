@@ -284,7 +284,7 @@ function fetchdicom_parsestudies(){
 	metadata_array=()
 	# index for loop
 	study_index=0
-	printf "Parsing Metadata for Studies:\n${studies_array}[@]"
+	printf "Parsing Metadata for Studies:\n${studies_array}[*]"
 	# Begin loop over studies
 	while [ "${study_index}" -lt "${numstudies}" ]; do
 		echo -n '.'
