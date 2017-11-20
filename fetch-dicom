@@ -155,7 +155,7 @@ function fetchdicom_checkdataexists(){
     [ "${d}" ] && local day="${r}/${y}/${m}/${d}"
     # Search for input subject
     # TODO what if there is no input subject?
-    [ -z "${s}" ] && echo "Must specify subject ID -- dev TODO: show list of PIs, Projects, Subjects & Dates to choose from"] && fetchdicom_help && exit
+    [ -z "${s}" ] && echo "📌  Must specify subject ID -- dev TODO: show list of PIs, Projects, Subjects & Dates to choose from" && fetchdicom_help && exit
 	[ ! -z "${s}" ] && echo -e "\n🔍  Searching DICOM Database for Subject ID: ${s}\n"		
 	# Check if raw data directory exists, if individual years, months and days also exist (if input)
 	[ ! -d "${r}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Directory (${r}) Cannot be Found.. exiting..." && exit
@@ -165,8 +165,7 @@ function fetchdicom_checkdataexists(){
 	# check for existence of sessions on this day
 	studies=$(ls -ld ${day}/*/*.STU | awk '{print $NF}')
 	[ -z "${studies}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  No Studies Exist on ${y}-${m}-${d} (directory is empty)... exiting.." && exit
-	# check for existence of series in session
-	${studies_array[study_index]}/*.SER
+	# check for existence of series within each session?
 }
 # Define Function
 ## 
@@ -290,7 +289,7 @@ function fetchdicom_parsestudies(){
 	while [ "${study_index}" -lt "${numstudies}" ]; do
 		echo -n '.'
 		# check for existence of series in session
-		series=$(ls -ld 149959/*.SER | awk '{print $NF}' | sed "s_149959/__")
+		series=$(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}' | sed "s_149959/__")
 		[ -z "${series}" ] && echo -e "\n -- WARNING -- No Series Exist for Study ${studies_array[study_index]}.. skipping ${studies_array[study_index]}" && break
 		# build an indexed array of studies
 		series_array+=($(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}')) # ${studies_array[study_index]} works because it's within ${ ... } brackets.
