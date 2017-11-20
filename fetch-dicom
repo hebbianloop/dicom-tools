@@ -154,7 +154,7 @@ function fetchdicom_checkdataexists(){
     [ "${d}" ] && local day="${r}/${y}/${m}/${d}"
     # Search for input subject
     # TODO what if there is no input subject?
-    [ -z "${s}" && echo "Must specify subject ID -- dev TODO: show list of PIs, Projects, Subjects & Dates to choose from"] && fetchdicom_help && exit
+    [ -z "${s}" ] && echo "Must specify subject ID -- dev TODO: show list of PIs, Projects, Subjects & Dates to choose from"] && fetchdicom_help && exit
 	[ ! -z "${s}" ] && echo -e "\n🔍  Searching DICOM Database for Subject ID: ${s}\n"		
 	# Check if raw data directory exists, if individual years, months and days also exist (if input)
 	[ ! -d "${r}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Directory (${r}) Cannot be Found.. exiting..." && exit
