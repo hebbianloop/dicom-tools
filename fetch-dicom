@@ -11,9 +11,9 @@ r=${CFMIDICOMDIR}
 ## Subject Name
 s=''
 ## Subject Scan Date
-y='.'
-m='.'
-d='.'
+y=''
+m=''
+d=''
 ## Extract Specific Sequence?
 t=''
 ## Exclude subject identifiers?
@@ -32,12 +32,12 @@ function fetchdicom_help(){
 	Required Arguments
 		  \t-r  --rawdatadir\t\tpath to dicoms (subdirectory tree must follow ./YYYY/MM/DD)
 	      \t-o  --outputdir\t\t\textract dicoms here	       
-	      \t-s  --subject\t\t\tsubject ID
+	      \t-s  --subject\t\t\tsearch for subject ID
+
+	Optional Arguments
 	      \t-y  --year\t\t\tyear of scan date
 	      \t-m  --month\t\t\tmonth of scan date
-	      \t-d  --day\t\t\tday of scan date
-
-	Optional Arguments 	      
+	      \t-d  --day\t\t\tday of scan date	 	      
 	      \t-t  --tasks\t\t\tlist of tasks to extract data for (series description)
 	      \t-prv --private\t\t\tomit identifiers from meta data text file (will still be present in dcm headers)
 	      
@@ -46,7 +46,7 @@ function fetchdicom_help(){
 		  \t-h  --help\t\t\tdisplays this message\n\n
 
 EOF
-	       )
+)
 	echo -e "${helpstr}"
 }
 # Define Function
@@ -142,30 +142,65 @@ function fetchdicom_dependencies(){
 	[ -z "$(which parallel)" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  GNU parallel does not appear to be properly installed.. exiting..." && exit
 }
 function fetchdicom_builddatabase(){
-	# Create a YAML file of raw data hierarchy - root
-	# TODO: show list of PIs, Projects, Subjects & Dates to choose from
-	echo 'testing'
+	DBname=$(echo $(hostname)${r} | sed 's_/_|_g')
+	[ ! -d ${HOME}/.fetch-dicom.db ] && mkdir -pv ${HOME}/.fetch-dicom.db
+	# check if ${r} is found in existing DB
+	[ ! -f ${DBname} ] && tree --du --si -C -D ${r} -J | sed 's/},]/}]/g' > ${HOME}/.fetch-dicom.db/${DBname}.json
+	# now manipulate json file... 
+	## 1. Add PI, Scan Date, SubjectID Scanner to Session
+	## 2. Add protocol and parameters to series
+}
+function fetchdicom_traversetree(){
+    echo -e "\n🔍 Traversing DICOM Directory Tree: $(tree --du --si -C -D -L 1 ${r})  📂  Searching for Session Data"
+    ## THIS METHOD IS NOT EFFICIENT
+    ## -- BUILD DATABSE OF FOLDER TREE, STORE IN GLOBAL FETCH-DICOM DATABASE.. QUERY DATABASE TO SEARCH AND FIND DATA
+    basedirs=$(ls -ld * | awk '{print $NF}')
+	[ $(echo "${basedirs}" | grep "${s}") ] && studies=$(pwd)/$(ls -ld * | awk {'print $NF}' | grep "${s}")
+    [ ! $(echo "${basedirs}" | grep "${s}") ] && studies=$(find ${r} -type d -name "*.STU" -print | xargs)
+    [ ! "${studies}" ] && echo -e "\n🚩 Session Folders *.STU Not Found, Searching for Series *.SER" && studies=$(find ${r} -type d -name "*.SER" -print | xargs)
+	studies_array=($(ls -ld ${studies} | awk '{print $NF}'))
+	# check for existence of sessions if date and subject name is given
+	echo -e "\n📂  Searching ${#studies_array[*]} Session(s) for *.SER Data for Subject ${s}\n"    
+	echo "${studies}"
+}
+function fetchdicom_traversetreebydate(){
+	# Search for DICOM Assuming Date Organized File Hierarchy
+    ## substitute year, month or day with wildcard if missing	
+    [ ! ${y} ] && y='*'
+    [ ! ${m} ] && m='*'
+    [ ! ${d} ] && d='*'	
+	## build local variables of absolute path to year, month and day
+    local year="${r}/${y}"
+    local month="${r}/${y}/${m}"
+    local day="${r}/${y}/${m}/${d}"
+    ## 
+	echo -e "\n🔍 Searching DICOM Directory Tree for Sessions Acquired on $y-$m-$d\n$(tree -d -L 1 ${day} --noreport)"    
+	[ ! "${year}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Year ${y}.. exiting..." && exit
+	[ ! "${month}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Month ${m}.. exiting..." && exit
+	[ ! "${day}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Day ${y}-${m}-${d}.. exiting..." && exit    
+	## Create array of all studies in yyyy-mm-dd (wildcard compatible)
+	studies=$(ls -ld ${day}/*.STU | awk '{print $NF}')	
+	studies_array=($(ls -ld ${studies} | awk '{print $NF}'))
+	# check for existence of sessions if date and subject name is given
+	echo -e "\n📂  Searching ${#studies_array[*]} Session(s) for Subject ${s} on date(s) $y-$m-$d\n"
 }
 # Define Function
 ## Check if subject data exists
 function fetchdicom_checkdataexists(){
-	# Search for DICOM Assuming Date Organized File Hierarchy
-    [ "${y}" ] && local year="${r}/${y}"
-    [ "${m}" ] && local month="${r}/${y}/${m}"
-    [ "${d}" ] && local day="${r}/${y}/${m}/${d}"
     # Search for input subject
     # TODO what if there is no input subject?
-    [ -z "${s}" ] && echo "📌  Must specify subject ID -- dev TODO: show list of PIs, Projects, Subjects & Dates to choose from" && fetchdicom_help && exit
-	[ ! -z "${s}" ] && echo -e "\n🔍  Searching DICOM Database for Subject ID: ${s}\n"		
+    [ -z "${s}" ] && echo "📌  Must specify subject ID -- dev TODO: show list of PIs, Projects, Subjects & Dates to choose from" && fetchdicom_help && exit		
 	# Check if raw data directory exists, if individual years, months and days also exist (if input)
 	[ ! -d "${r}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Directory (${r}) Cannot be Found.. exiting..." && exit
-	[ ! -d "${year}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Year ${y}.. exiting..." && exit
-	[ ! -d "${month}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Month ${m}.. exiting..." && exit
-	[ ! -d "${day}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Day ${y}-${m}-${d}.. exiting..." && exit
-	# check for existence of sessions on this day
-	studies=$(ls -ld ${day}/*/*.STU | awk '{print $NF}')
-	[ -z "${studies}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  No Studies Exist on ${y}-${m}-${d} (directory is empty)... exiting.." && exit
-	# check for existence of series within each session?
+    # Traverse tree and find all .STUs
+    ## by date
+    [ "${d}" ] || [ "${m}" ] || [ "${y}" ] && fetchdicom_traversetreebydate
+    ## without date input
+    [ ! "${d}" ] || [ ! "${m}" ] || [ ! "${y}" ] && fetchdicom_traversetree
+	# Exception
+	[ -z "${studies}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  No Study Folders Ending in *.STU Can Be Found ... exiting.." && exit
+	# TODO :: check for existence of series within each session?
+	##	
 }
 # Define Function
 ## 
@@ -176,6 +211,7 @@ function fetchdicom_parsedcmheader(){
 	cd "${acqs}"
 	# No need to loop through .IMAs.. just grab meta data from first file in list
 	local dicomfile=$(ls -dl *.IMA | tail -n +1 | head -1 | awk '{print $NF}')
+	dicom_header=$(dicom_hdr $dicomfile)
 	# Get Subject Name
 	subject=$(dicom_hdr $dicomfile | grep 'Patient Name' | sed 's/.*\[.*\/\/\(.*\)/\1/')
 	# Get Series Name
@@ -263,7 +299,7 @@ Patient Safety ::\n
 --------------------------------------------------------------------------------------\n
 This file was generated on $(date) by $(whoami)@$(hostname)\n;
 EOF
-		 )	
+)	
 ## Print metadatum out to be captured as output from parallel
 echo ${metadatum}
 #
@@ -284,15 +320,12 @@ function fetchdicom_parsestudies(){
 	metadata_array=()
 	# index for loop
 	study_index=0
-	printf "\t--Parsing Study MetaData"
+	printf "Parsing Studies:\n"
 	# Begin loop over studies
 	while [ "${study_index}" -lt "${numstudies}" ]; do
 		echo -n '.'
-		echo 'test'
 		# check for existence of series in session
 		series=$(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}' | sed "s_149959/__")
-		# print to screen
-		echo -e "\t--"${studies_array[study_index]}
 		if [ -z "${series}" ]; then
 			echo -e "\n -- WARNING -- No Series Exist for Study ${studies_array[study_index]}.. skipping ${studies_array[study_index]}"
 		else
@@ -330,6 +363,8 @@ function fetchdicom_parsestudy(){
 	local weight=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Weight(kg)//p' | uniq)
 	# capture PI
 	local PI=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n "s/PI's^//p" | uniq | sed "s/Study Description//")
+	# capture scandate
+	local scandate=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Scan Date//p' | uniq)	
 	# capture session time
 	local sessionstarttime=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n "s/Session Start Time//p" | uniq | sed 's/\..*//' | sed 's/.\{4\}/&:/; s/.\{7\}/&:/')
 	[ -z "${PI}" ] && PI="<unknown>"
@@ -337,13 +372,14 @@ local subject_info=$(cat <<-EOF
 \n
 ♔ Study PI: ${PI}\n
 ✎ SID: ${subjects[study_index]}\n
-
+✎ Session Date: $(date -d ${scandate} '+%b %d %Y')\n
+\n
 ✎ Age:${age}\n
 ✎ Sex:${sex}\n
 ✎ Wgt:${weight}\n
 ✎ Series (In Order Acquired)  ‣  Session Start Time: ${sessionstarttime}
 EOF
-      )
+)
 echo -e ${subject_info}
 echo "${series}" | nl
 }
@@ -367,11 +403,11 @@ function fetchdicom_copydata(){
 # Define Function
 ## Parse Meta-Data
 function fetchdicom_dataseek(){
-	# make array of studies and count number of eleements
-	studies_array=($(ls -ld ${studies} | awk '{print $NF}')) && numstudies=${#studies_array[*]}
-	# Parse the Studies on Given Date
+	# count number of eleements
+	numstudies=${#studies_array[*]}
+	# Parse the Studies 
 	fetchdicom_parsestudies
-	echo -e "🗒  ${numstudies} Studies Found..." # print number of studies found on this date
+	#echo -e "🗒  ${numstudies} Studies Found..." # print number of studies found on this date
 	# get list of subjects acquired on this day
 	subjects=($(echo -e ${metadata_array[*]} | grep 'Subject ID' | uniq | awk '{print $NF}'))
 	# index for loop
