@@ -141,6 +141,7 @@ function fetchdicom_dependencies(){
 	# Check for GNU Parallel
 	[ -z "$(which parallel)" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  GNU parallel does not appear to be properly installed.. exiting..." && exit
 }
+## TODO WORK IN PROGRESS ##
 function fetchdicom_builddatabase(){
 	DBname=$(echo $(hostname)${r} | sed 's_/_|_g')
 	[ ! -d ${HOME}/.fetch-dicom.db ] && mkdir -pv ${HOME}/.fetch-dicom.db
@@ -152,8 +153,9 @@ function fetchdicom_builddatabase(){
 }
 function fetchdicom_traversetree(){
     echo -e "\n🔍 Traversing DICOM Directory Tree: $(tree --du --si -C -D -L 1 ${r})  📂  Searching for Session Data"
-    ## THIS METHOD IS NOT EFFICIENT
+    ## TODO THIS METHOD IS NOT EFFICIENT
     ## -- BUILD DATABSE OF FOLDER TREE, STORE IN GLOBAL FETCH-DICOM DATABASE.. QUERY DATABASE TO SEARCH AND FIND DATA
+    ## -- see above function fetchdicom_builddatabase
     basedirs=$(ls -ld * | awk '{print $NF}')
 	[ $(echo "${basedirs}" | grep "${s}") ] && studies=$(pwd)/$(ls -ld * | awk {'print $NF}' | grep "${s}")
     [ ! $(echo "${basedirs}" | grep "${s}") ] && studies=$(find ${r} -type d -name "*.STU" -print | xargs)
@@ -175,9 +177,9 @@ function fetchdicom_traversetreebydate(){
     local day="${r}/${y}/${m}/${d}"
     ## 
 	echo -e "\n🔍 Searching DICOM Directory Tree for Sessions Acquired on $y-$m-$d\n$(tree -d -L 1 ${day} --noreport)"    
-	[ ! "${year}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Year ${y}.. exiting..." && exit
-	[ ! "${month}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Month ${m}.. exiting..." && exit
-	[ ! "${day}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Day ${y}-${m}-${d}.. exiting..." && exit    
+	[ ! -d "${year}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Year ${y}.. exiting..." && exit
+	[ ! -d "${month}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Month ${m}.. exiting..." && exit
+	[ ! -d "${day}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Day ${y}-${m}-${d}.. exiting..." && exit    
 	## Create array of all studies in yyyy-mm-dd (wildcard compatible)
 	studies=$(ls -ld ${day}/*.STU | awk '{print $NF}')	
 	studies_array=($(ls -ld ${studies} | awk '{print $NF}'))
