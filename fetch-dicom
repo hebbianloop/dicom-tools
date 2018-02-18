@@ -156,14 +156,15 @@ function fetchdicom_traversetree(){
     ## TODO THIS METHOD IS NOT EFFICIENT
     ## -- BUILD DATABSE OF FOLDER TREE, STORE IN GLOBAL FETCH-DICOM DATABASE.. QUERY DATABASE TO SEARCH AND FIND DATA
     ## -- see above function fetchdicom_builddatabase
-    basedirs=$(ls -ld * | awk '{print $NF}')
-	[ $(echo "${basedirs}" | grep "${s}") ] && studies=$(pwd)/$(ls -ld * | awk {'print $NF}' | grep "${s}")
-    [ ! $(echo "${basedirs}" | grep "${s}") ] && studies=$(find ${r} -type d -name "*.STU" -print | xargs)
+    #basedirs=$(ls -ld * | awk '{print $NF}') # old code.. look in current directory for subject ID
+    #[ $(echo "${basedirs}" | grep "${s}") ] && studies=$(pwd)/$(ls -ld * | awk {'print $NF}' | grep "${s}")
+	#[ ! $(echo "${basedirs}" | grep "${s}") ] && studies=$(find ${r} -type d -name "*.STU" -print | xargs)
+	echo -e "\n🔍 Searching DICOM Directory Tree for *.STU Directories.. this might take a while ☕️)" && studies=$(find ${r} -type d -name "*.STU" -print | xargs)
     [ ! "${studies}" ] && echo -e "\n🚩 Session Folders *.STU Not Found, Searching for Series *.SER" && studies=$(find ${r} -type d -name "*.SER" -print | xargs)
 	studies_array=($(ls -ld ${studies} | awk '{print $NF}'))
 	# check for existence of sessions if date and subject name is given
 	echo -e "\n📂  Searching ${#studies_array[*]} Session(s) for *.SER Data for Subject ${s}\n"    
-	echo "${studies}"
+	# echo "${studies}"
 }
 function fetchdicom_traversetreebydate(){
 	# Search for DICOM Assuming Date Organized File Hierarchy
@@ -201,7 +202,6 @@ function fetchdicom_checkdataexists(){
     [ ! "${d}" ] || [ ! "${m}" ] || [ ! "${y}" ] && fetchdicom_traversetree
 	# Exception
 	[ -z "${studies}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  No Study Folders Ending in *.STU Can Be Found ... exiting.." && exit
-	# TODO :: check for existence of series within each session?
 	##	
 }
 # Define Function
@@ -254,25 +254,25 @@ function fetchdicom_parsedcmheader(){
 	local vers=$(dicom_hdr $dicomfile | grep 'ACQ Software Version' | sed 's/.*\[.*\/\/\(.*\)/\1/')
 	# Create Text
 	metadatum=$(cat <<-EOF
---------------------------------------------------------------------------------------\n
-Fetching Dicom Series ::\n
+\n\n
+--------------------------------------------------------------\n
+${seriesname}\n
 ${ser}\n
 PI\t\t\t${piname##PI\'s^}\n
 Study Description\t${studydesc}\n
 Scan Date\t\t${scandate}\n
 Session Start Time\t${sesstime}\n
+Sequence Start Time\t${scantime}\n
 \n
 Subject ID\t\t${subject}\n
 Age\t\t\t${age}\n
 Sex\t\t\t${sex}\n
 Weight(kg)\t\t${wgt}\n
 \n
-Sequence Description\t${seriesname}\n
-Sequence Start Time\t${scantime}\n
 \n
 Acquisition Hardware -- ${manufacturer}\n
 Acquisition Software -- ${vers}\n
---------------------------------------------------------------------------------------\n
+\n
 Internal Sequence Name\t\t${seqname}\n
 Scanning Parameters ::\n
 \n
@@ -298,8 +298,8 @@ Scanning Parameters ::\n
 Patient Safety ::\n
 \tSAR\t\t${sar}\n
 \tSound (dB)\t\t${soundb}\n
---------------------------------------------------------------------------------------\n
-This file was generated on $(date) by $(whoami)@$(hostname)\n;
+Sequence Description\t${seriesname}\n
+;
 EOF
 )	
 ## Print metadatum out to be captured as output from parallel
@@ -326,8 +326,12 @@ function fetchdicom_parsestudies(){
 	# Begin loop over studies
 	while [ "${study_index}" -lt "${numstudies}" ]; do
 		echo -n '.'
+		## TODO
+		## Make this dependent on .IMA file NOT the .SER or .ACQ directory naming convention
+		## - use a find operation to find paths to .IMA then breakdown then iterate over those?
+		## - figure out how to parse output to parse dcmheader (should be doable.. and simpler!)
 		# check for existence of series in session
-		series=$(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}' | sed "s_149959/__")
+		series=$(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}')
 		if [ -z "${series}" ]; then
 			echo -e "\n -- WARNING -- No Series Exist for Study ${studies_array[study_index]}.. skipping ${studies_array[study_index]}"
 		else
@@ -384,6 +388,7 @@ EOF
 )
 echo -e ${subject_info}
 echo "${series}" | nl
+#echo -e ${metadata_array[*]:running_total:numseries_array[study_index]}
 }
 # Define Function
 ## Select Desired Series
@@ -436,6 +441,7 @@ function fetchdicom_dataseek(){
 			if [ "${s}" = "${sub}" ]; then
 				### TODO make this part cleaner.. so that information about subject is printed
 				fetchdicom_parsestudy && series_files=(${series_array[*]:running_total:numseries_array[study_index]}) && fetchdicom_copydata && flag='subjectfound'
+				echo -e "$(fetchdicom_parsestudy)"${metadata_array[*]:running_total:numseries_array[study_index]}"\n\nThis file was generated on $(date) by $(whoami)@$(hostname)\n\n" > ${o}/${s}/session-info.txt
 				break
 			fi
 			((running_total+=${numseries_array[study_index]}))			
