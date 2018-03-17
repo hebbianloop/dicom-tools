@@ -2,6 +2,9 @@
 # Extract a Single Subject's DICOM from CFMI File-Systems 
 
 ## TODO -- make it a single date input and parse the date into yyyy/mm/dd
+##      -- take wild card as date input to search all days in month or all months in year
+##      -- provide option to ask user if he wants data
+##      -- what about extracting specific tasks?
 
 # Default Arguments
 ## Output Data Here
