@@ -2,9 +2,11 @@
 # Extract a Single Subject's DICOM from CFMI File-Systems 
 
 ## TODO -- make it a single date input and parse the date into yyyy/mm/dd
+##      -- IMPORTANT :: check all sessions for ID EXHAUSTIVELY! you can miss data this way
 ##      -- take wild card as date input to search all days in month or all months in year
 ##      -- provide option to ask user if he wants data
 ##      -- what about extracting specific tasks?
+##      -- build database (update regularly)
 
 # Default Arguments
 ## Output Data Here
@@ -162,7 +164,7 @@ function fetchdicom_traversetree(){
     #basedirs=$(ls -ld * | awk '{print $NF}') # old code.. look in current directory for subject ID
     #[ $(echo "${basedirs}" | grep "${s}") ] && studies=$(pwd)/$(ls -ld * | awk {'print $NF}' | grep "${s}")
 	#[ ! $(echo "${basedirs}" | grep "${s}") ] && studies=$(find ${r} -type d -name "*.STU" -print | xargs)
-	echo -e "\n🔍 Searching DICOM Directory Tree for *.STU Directories.. this might take a while ☕️)" && studies=$(find ${r} -type d -name "*.STU" -print | xargs)
+	echo -e "\n🔍 Searching DICOM Directory Tree for *.STU Directories.. (this might take a while ☕️)" && studies=$(find ${r} -type d -name "*.STU" -print | xargs)
     [ ! "${studies}" ] && echo -e "\n🚩 Session Folders *.STU Not Found, Searching for Series *.SER" && studies=$(find ${r} -type d -name "*.SER" -print | xargs)
 	studies_array=($(ls -ld ${studies} | awk '{print $NF}'))
 	# check for existence of sessions if date and subject name is given
@@ -195,7 +197,7 @@ function fetchdicom_traversetreebydate(){
 function fetchdicom_checkdataexists(){
     # Search for input subject
     # TODO what if there is no input subject?
-    [ -z "${s}" ] && echo "📌  Must specify subject ID -- dev TODO: show list of PIs, Projects, Subjects & Dates to choose from" && fetchdicom_help && exit		
+    #[ -z "${s}" ] && echo "📌  Must specify subject ID -- dev TODO: show list of PIs, Projects, Subjects & Dates to choose from" && fetchdicom_help && exit		
 	# Check if raw data directory exists, if individual years, months and days also exist (if input)
 	[ ! -d "${r}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Directory (${r}) Cannot be Found.. exiting..." && exit
     # Traverse tree and find all .STUs
@@ -420,6 +422,8 @@ function fetchdicom_dataseek(){
 	#echo -e "🗒  ${numstudies} Studies Found..." # print number of studies found on this date
 	# get list of subjects acquired on this day
 	subjects=($(echo -e ${metadata_array[*]} | grep 'Subject ID' | uniq | awk '{print $NF}'))
+#	echo found ... ${subjects[@]}
+#	echo in sessions ${studies_array[@]}
 	# index for loop
 	study_index=0
 	# running total of num series elapsed (used to index metadata array)
@@ -445,7 +449,7 @@ function fetchdicom_dataseek(){
 				### TODO make this part cleaner.. so that information about subject is printed
 				fetchdicom_parsestudy && series_files=(${series_array[*]:running_total:numseries_array[study_index]}) && fetchdicom_copydata && flag='subjectfound'
 				echo -e "$(fetchdicom_parsestudy)"${metadata_array[*]:running_total:numseries_array[study_index]}"\n\nThis file was generated on $(date) by $(whoami)@$(hostname)\n\n" > ${o}/${s}/session-info.txt
-				break
+				#break
 			fi
 			((running_total+=${numseries_array[study_index]}))			
 			((study_index++))
