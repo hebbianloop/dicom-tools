@@ -1,0 +1,50 @@
+{
+    "descriptions": [
+        {
+            "dataType": "anat",
+            "modalityLabel": "T1w",
+            "criteria": {
+                "SeriesDescription": "*Siemens_MPRAGE*"
+            }
+        },
+        {
+            "dataType": "dwi",
+            "modalityLabel": "dwi",
+            "criteria": {
+                "SeriesDescription": "*ep2d_diff_80dir_iPAT_ColFA*"
+            }
+        },        
+        {
+            "dataType": "func",
+            "modalityLabel": "bold",
+            "customLabels": "rest",
+            "criteria": {
+                "SeriesDescription": "*ep2d_3mm3_TR=2_first_rest*"
+            }
+        },
+        {
+            "dataType": "func",
+            "modalityLabel": "bold",
+            "customLabels": "gonogo",
+            "criteria": {
+                "SeriesDescription": "*ep2d_3.0mm_Go-NoGo1*"
+            }
+        },
+        {
+            "dataType": "func",
+            "modalityLabel": "bold",
+            "customLabels": "emostroop",
+            "criteria": {
+                "SeriesDescription": "*ep2d_3.0mm_EmoStroop_NeutFirst*"
+            }
+        },
+        {
+            "dataType": "func",
+            "modalityLabel": "bold",
+            "customLabels": "wof",
+            "criteria": {
+                "SeriesDescription": "*ep2d_3.0mm_WoF*"
+            }
+        } 
+    ]
+}
