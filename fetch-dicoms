@@ -7,9 +7,9 @@ today=$(date)
 
 r="/Volumes/CFMI-CFS/mnt/CFMI-DICOMS/"
 o="/Volumes/CFMI-CFS/sync/ADS/data/mri/dicoms"
-f="$o/ADS-MRI-DATES.txt"
+f="${HOME}/ADS-MRI-DATES.txt"
 
-# Get Meta Data For Extraction
+# Get Meta Data For Extraction From File (f)
 echo -e "\n📃   Extracting Subject IDS and Scan Dates from $f\n"
 subject=$(awk '{print $1}' $f)
 scandate=($(awk '{print $2}' $f))
@@ -19,7 +19,7 @@ session=($(awk '{print $3}' $f))
 counter=0
 for s in $subject; do
     # Get Session Label
-    ss=${session[$counter]}
+    # ss=${session[$counter]}
 	# Extract Year, Month and Day
 	datestr=${scandate[$counter]}
 	SAVEIFS=${IFS} && IFS='-' read -ra datestr <<< "$datestr"
@@ -27,7 +27,7 @@ for s in $subject; do
 	mon="${datestr[1]}"
 	day="${datestr[2]}"
 	IFS=${SAVEIFS}
-	fetch-dicom -s ${s} -o ${o}/wave-${ss} -y $year -m $mon -d $day 
+	fetch-dicom -s ${s} -o ${o} -y $year -m $mon -d $day -r ${r}
 	# Pull dicom for subject
 	counter=$((counter+1))
 done
