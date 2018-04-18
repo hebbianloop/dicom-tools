@@ -30,12 +30,11 @@ if [ -z $(which parallel) ]; then
     	echo "GNU parallel does not exist on this system.. this installation is complicated.. please download->build first then run this again.. sorry! exiting.." && exit
     fi
 fi
-# Loop across subjects then do tasks
-	subjects=$(find ${DICOMDIR}/ -type d -d 1 | sed 's|/| |g' | awk '{print $NF}')
-	##  build jsons for each subject
-	for subject in ${subjects}; do
-		parallel -k --link --bar dcm2niix -b o -ba n ${DICOMDIR}/${subject}/{} ::: $(find ${DICOMDIR}/${subject} -type d -d 1 | sed 's|/| |g' | awk '{print $NF}') 
-	done
-	## now convert
-	parallel -k --link --bar dcm2bids -d ${DICOMDIR}/{}/* -p {} -s ses-01 -c /Volumes/Anvil/sync/mri.raw/adolescent-development-study/config.json -o ${BIDSDIR} ::: $(find ${DICOMDIR}/ -type d -d 1 | sed 's|/| |g' | awk '{print $NF}')	
+#
+subjects=$(find ${DICOMDIR}/ -type d -d 1 | sed 's|/| |g' | awk '{print $NF}')
+##  build jsons for each subject
+for subject in ${subjects}; do
+	parallel -k --link --bar dcm2niix -b o -ba n ${DICOMDIR}/${subject}/{} ::: $(find ${DICOMDIR}/${subject} -type d -d 1 | sed 's|/| |g' | awk '{print $NF}') 
 done
+## now convert
+parallel -k --link --bar dcm2bids --forceDcm2niix --clobber -d ${DICOMDIR}/{}/* -p {} -s ses-01 -c /Volumes/Anvil/sync/mri.raw/adolescent-development-study/config.json -o ${BIDSDIR} ::: $(find ${DICOMDIR}/ -type d -d 1 | sed 's|/| |g' | awk '{print $NF}')	
