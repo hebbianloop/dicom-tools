@@ -1,62 +1,12 @@
 #!/bin/bash
-# Extract a Single Subject's DICOM from CFMI File-Systems 
-
-## TODO -- make it a single date input and parse the date into yyyy/mm/dd
-##      -- IMPORTANT :: check all sessions for ID EXHAUSTIVELY! you can miss data this way
-##      -- take wild card as date input to search all days in month or all months in year
-##      -- provide option to ask user if he wants data
-##      -- what about extracting specific tasks?
-##      -- build database (update regularly)
-
-# Default Arguments
-## Output Data Here
-o=$(pwd)
-## Raw Data Directory Here (should be directory with ./years/mos/days)
-r=${CFMIDICOMDIR}
-## Subject Name
-s=''
-## Subject Scan Date
-y=''
-m=''
-d=''
-## Extract Specific Sequence?
-t=''
-## Exclude subject identifiers?
-private=''
-# Function Definitions
-## Show the help documentation
-function fetchdicom_help(){
-	helpstr=$(cat <<-EOF
-
-	Usage :: ${0##*/} 	[-h|--help] [-r|--rawdatadir PATH] [-o|--outputdir PATH] [-s|--subject] 
-						\t\t\t[-y|--year YYYY] [-m|--month MM] [-d|--day DD] [-t|--tasks LIST]
-
-	Search for Seimens .IMA files in the raw data directory for a subject scanned on YYYY-MM-DD. User can specify tasks 
-	for extraction, or leave blank to extract everything. Dicoms are placed in the output directory.
-
-	Required Arguments
-		  \t-r  --rawdatadir\t\tpath to dicoms (subdirectory tree must follow ./YYYY/MM/DD)
-	      \t-o  --outputdir\t\t\textract dicoms here	       
-	      \t-s  --subject\t\t\tsearch for subject ID
-
-	Optional Arguments
-	      \t-y  --year\t\t\tyear of scan date
-	      \t-m  --month\t\t\tmonth of scan date
-	      \t-d  --day\t\t\tday of scan date	 	      
-	      \t-t  --tasks\t\t\tlist of tasks to extract data for (series description)
-	      \t-prv --private\t\t\tomit identifiers from meta data text file (will still be present in dcm headers)
-	      
-
-	Other Arguments
-		  \t-h  --help\t\t\tdisplays this message\n\n
-
-EOF
-)
-	echo -e "${helpstr}"
-}
+# Build a DICOM database with datalad
+OPTIONS="$@"
+VERSION=0.0.1
 # Define Function
 ## Parse Input Arguments
 function fetchdicom_parseoptions(){
+	clear && printf '\e[3J'
+	fetchdicom_declarations
 	while :; do
 		case ${1} in
 			-h|--help)
@@ -66,69 +16,57 @@ function fetchdicom_parseoptions(){
 			-prv|--private)
 				private='omit identifiers'
 			;;
-			-r|--rawdatadir)
+			install)
+				INSTALL='true'
+			;;
+			config)
+				CONFIG='true'
 				if [ -n "${2}" ]; then
-					r=${2}
+					DATABASE=${2}
+				else
+					if [ -d ${DATABASEDIR} ] && [ $(find ${DATABASEDIR} -name '*.config' | sed 's|/| |g' | awk '{print $NF}' | sed 's|.config||g' | wc -l) -gt 1 ]; then
+						echo -e "\n${YELLOW}WARNING: Multiple Databases Detected${NC}\n\n\t..which database would you like to configure?\n" >&2
+						echo -e "$(find ${DATABASEDIR} -name '*.config' | sed 's|/| |g' | awk '{print $NF}' | sed 's|.config||g' | nl)" && echo ''
+						read -p "Enter exact name or (n)ew to create new database >> " response
+						[ "${response}" = 'n' ] || [ "${response}" = 'new' ] && fetchdicom_config.database
+						DATABASE=$(find ${DATABASEDIR} -name "${response}.config" | sed 's|/| |g' | awk '{print $NF}' | sed 's|.config||g')
+						[ ! "${DATABASE}" ] && echo -e "${YELLOW}Entered response, does not match existing database names.. " >&2 && read -p "⏎   to try again, ctrl + c to quit" && fetchdicom_run
+					elif [ $(find ${DATABASEDIR} -name '*.config' | sed 's|/| |g' | awk '{print $NF}' | sed 's|.config||g' | wc -l) -eq 1 ]; then
+						DATABASE=$(find ${DATABASEDIR} -name '*.config' | sed 's|/| |g' | awk '{print $NF}' | sed 's|.config||g')
+					else
+						fetchdicom_config.database
+					fi
+					shift
+				fi				
+			;;			
+			from)
+				if [ -n "${2}" ]; then
+					DATABASE=${2}
+					RETRIEVE='true'
 					shift
 				else
-					echo -e "ERROR -r --rawdatadir requires a non-empty option argument.\n" >&2
-					exit
+					echo -e "\n${RED}ERROR: ${NC}fetch dicom from where? missing name of database.. example) ${0##*/} from dicomdb.cfmi\n" >&2
+					EXIT=1 && fetchdicom_exit
 				fi
 			;;
-			-o|--outputdir)
+			create)
 				if [ -n "${2}" ]; then
-					o=${2}
+					DATABASE=${2}
+					CREATE='true'
 					shift
 				else
-					echo -e "ERROR -o --outputdir requires a non-empty option argument.\n" >&2
-					exit
-				fi
+					echo -e "\n${RED}ERROR: ${NC}create what? missing name of database.. example) ${0##*/} create mydicomdb\n" >&2
+					EXIT=1 && fetchdicom_exit
+				fi				
 			;;
-			-s|--subject)
+			update)
+				UPDATE='true'
 				if [ -n "${2}" ]; then
-					s=${2}
+					DATABASE=${2}
+					update='true'
 					shift
-				else
-					echo -e "Error -s --subject requires a non-empty option argument.\n" >2&
-					exit
-				fi
-			;;
-        	-y|--year)
-            	if [ -n "${2}" ]; then
-                	y=${2}
-                	shift
-            	else
-                	echo -e "ERROR:  -y --year requires a non-empty option argument.\n" >&2
-                	exit 
-            	fi
-            ;;            
-	        -m|--month)
-	            if [ -n "${2}" ]; then
-	                m=${2}
-	                shift
-	            else
-	                echo "ERROR:  -m --month requires a non-empty option argument.\n" >&2
-	                exit 
-	            fi
-	        ;;  
-	        -d|--day)
-	            if [ -n "${2}" ]; then
-	                d=${2}
-	                shift
-	            else
-	                echo -e "ERROR:  -d --day requires a non-empty option argument.\n" >&2
-	                exit 
-	            fi
-	        ;;                        
-	        -t|--tasks)
-	            if [ -n "${2}" ]; then
-	                t=${2}
-	                shift
-	            else
-	                echo -e "ERROR:  -t --tasks requires a non-empty option argument.\n" >&2
-	                exit 
-	            fi
-	        ;;	
+				fi				
+			;;			
 	        -?*)
 	            printf 'WARN: Unknown option (ignored): %s\n' "$1" >&2
 	        ;;
@@ -138,340 +76,513 @@ function fetchdicom_parseoptions(){
 	    shift
 	done
 }
-# Define Function
 ## Check for dependencies
 function fetchdicom_dependencies(){
-	# Check for AFNI
-	[ -z "$(which dicom_hdr)" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  AFNI does not appear to be properly installed.. exiting..." && exit
-	# Check for GNU Parallel
-	[ -z "$(which parallel)" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  GNU parallel does not appear to be properly installed.. exiting..." && exit
-}
-## TODO WORK IN PROGRESS ##
-function fetchdicom_builddatabase(){
-	DBname=$(echo $(hostname)${r} | sed 's_/_|_g')
-	[ ! -d ${HOME}/.fetch-dicom.db ] && mkdir -pv ${HOME}/.fetch-dicom.db
-	# check if ${r} is found in existing DB
-	[ ! -f ${DBname} ] && tree --du --si -C -D ${r} -J | sed 's/},]/}]/g' > ${HOME}/.fetch-dicom.db/${DBname}.json
-	# now manipulate json file... 
-	## 1. Add PI, Scan Date, SubjectID Scanner to Session
-	## 2. Add protocol and parameters to series
-}
-function fetchdicom_traversetree(){
-    echo -e "\n🔍 Traversing DICOM Directory Tree: $(tree --du --si -C -D -L 1 ${r})  📂  Searching for Session Data"
-    ## TODO THIS METHOD IS NOT EFFICIENT
-    ## -- BUILD DATABSE OF FOLDER TREE, STORE IN GLOBAL FETCH-DICOM DATABASE.. QUERY DATABASE TO SEARCH AND FIND DATA
-    ## -- see above function fetchdicom_builddatabase
-    #basedirs=$(ls -ld * | awk '{print $NF}') # old code.. look in current directory for subject ID
-    #[ $(echo "${basedirs}" | grep "${s}") ] && studies=$(pwd)/$(ls -ld * | awk {'print $NF}' | grep "${s}")
-	#[ ! $(echo "${basedirs}" | grep "${s}") ] && studies=$(find ${r} -type d -name "*.STU" -print | xargs)
-	echo -e "\n🔍 Searching DICOM Directory Tree for *.STU Directories.. (this might take a while ☕️)" && studies=$(find ${r} -type d -name "*.STU" -print | xargs)
-    [ ! "${studies}" ] && echo -e "\n🚩 Session Folders *.STU Not Found, Searching for Series *.SER" && studies=$(find ${r} -type d -name "*.SER" -print | xargs)
-	studies_array=($(ls -ld ${studies} | awk '{print $NF}'))
-	# check for existence of sessions if date and subject name is given
-	echo -e "\n📂  Searching ${#studies_array[*]} Session(s) for *.SER Data for Subject ${s}\n"    
-	# echo "${studies}"
-}
-function fetchdicom_traversetreebydate(){
-	# Search for DICOM Assuming Date Organized File Hierarchy
-    ## substitute year, month or day with wildcard if missing	
-    [ ! ${y} ] && y='*'
-    [ ! ${m} ] && m='*'
-    [ ! ${d} ] && d='*'	
-	## build local variables of absolute path to year, month and day
-    local year="${r}/${y}"
-    local month="${r}/${y}/${m}"
-    local day="${r}/${y}/${m}/${d}"
-    ## 
-	echo -e "\n🔍 Searching DICOM Directory Tree for Sessions Acquired on $y-$m-$d\n$(tree -d -L 1 ${day} --noreport)"    
-	[ ! -d "${year}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Year ${y}.. exiting..." && exit
-	[ ! -d "${month}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Month ${m}.. exiting..." && exit
-	[ ! -d "${day}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Day ${y}-${m}-${d}.. exiting..." && exit    
-	## Create array of all studies in yyyy-mm-dd (wildcard compatible)
-	studies=$(ls -ld ${day}/*.STU | awk '{print $NF}')	
-	studies_array=($(ls -ld ${studies} | awk '{print $NF}'))
-	# check for existence of sessions if date and subject name is given
-	echo -e "\n📂  Searching ${#studies_array[*]} Session(s) for Subject ${s} on date(s) $y-$m-$d\n"
-}
-# Define Function
-## Check if subject data exists
-function fetchdicom_checkdataexists(){
-    # Search for input subject
-    # TODO what if there is no input subject?
-    #[ -z "${s}" ] && echo "📌  Must specify subject ID -- dev TODO: show list of PIs, Projects, Subjects & Dates to choose from" && fetchdicom_help && exit		
-	# Check if raw data directory exists, if individual years, months and days also exist (if input)
-	[ ! -d "${r}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Directory (${r}) Cannot be Found.. exiting..." && exit
-    # Traverse tree and find all .STUs
-    ## by date
-    [ "${d}" ] || [ "${m}" ] || [ "${y}" ] && fetchdicom_traversetreebydate
-    ## without date input
-    [ ! "${d}" ] || [ ! "${m}" ] || [ ! "${y}" ] && fetchdicom_traversetree
-	# Exception
-	[ -z "${studies}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  No Study Folders Ending in *.STU Can Be Found ... exiting.." && exit
-	##	
-}
-# Define Function
-## 
-function fetchdicom_parsedcmheader(){
-	# Takes path to dicom file as input and cds to dicom file directory (dicom_hdr only works if dicom file is in cwd)
-	## TODO - make this just take the first folder in the list
-	acqs=$(ls -dl ${1}/* | tail -n +1 | head -1 | awk '{print $NF}')
-	cd "${acqs}"
-	# No need to loop through .IMAs.. just grab meta data from first file in list
-	local dicomfile=$(ls -dl *.IMA | tail -n +1 | head -1 | awk '{print $NF}')
-	dicom_header=$(dicom_hdr $dicomfile)
-	# Get Subject Name
-	subject=$(dicom_hdr $dicomfile | grep 'Patient Name' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	# Get Series Name
-	seriesname=$(dicom_hdr $dicomfile | grep 'ID Series Description' | sed 's/.*\[.*\/\/\(.*\)/\1/')				
-	# Get Subject Information Unless Private Information is Censored
-	[ -z ${private} ] && local age=$(dicom_hdr $dicomfile | grep 'Patient Age' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	[ -z ${private} ] && local sex=$(dicom_hdr $dicomfile | grep 'Patient Sex' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	[ -z ${private} ] && local wgt=$(dicom_hdr $dicomfile | grep 'Patient Weight' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	# Get PI Name
-	local piname=$(dicom_hdr $dicomfile | grep 'ID Study Description' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	# Get Type of Scanner
-	local hardware=$(dicom_hdr $dicomfile | grep 'ID Manufacturer Model Name' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local manufacturer=$(dicom_hdr $dicomfile | grep 'ID Manufacturer' | sed 's/.*\[.*\/\/\(.*\)/\1/') && manufacturer=$(echo ${manufacturer}) #<--uhh wut?
-	# Get Date & time
-	local scandate=$(dicom_hdr $dicomfile | grep 'ID Image Date' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local sesstime=$(dicom_hdr $dicomfile | grep 'PRC PPS Start Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local scantime=$(dicom_hdr $dicomfile | grep 'ID Image Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	# Get Information About Sequence Acquisition
-	local studydesc=$(dicom_hdr $dicomfile | grep 'ID Study Description' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local seqname=$(dicom_hdr $dicomfile | grep 'ACQ Sequence Name' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local thk=$(dicom_hdr $dicomfile | grep 'ACQ Slice Thickness' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local rt=$(dicom_hdr $dicomfile | grep 'ACQ Repetition Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local et=$(dicom_hdr $dicomfile | grep 'ACQ Echo Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local inversiontime=$(dicom_hdr $dicomfile | grep 'ACQ Inversion Time' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local imgf=$(dicom_hdr $dicomfile | grep 'ACQ Imaging Frequency' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local imgnuc=$(dicom_hdr $dicomfile | grep 'ACQ Imaged Nucleus' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local echnum=$(dicom_hdr $dicomfile | grep 'ACQ Echo Number' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local tesla=$(dicom_hdr $dicomfile | grep 'ACQ Magnetic Field Strength' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local slcspacing=$(dicom_hdr $dicomfile | grep 'ACQ Spacing Between Slices' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local phaseencstps=$(dicom_hdr $dicomfile | grep 'ACQ Number of Phase Encoding Steps' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local echtrl=$(dicom_hdr $dicomfile | grep 'ACQ Echo Train Length' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local persamp=$(dicom_hdr $dicomfile | grep 'ACQ Percent Sampling' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local perfov=$(dicom_hdr $dicomfile | grep 'ACQ Percent Phase Field of View' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local phzencd=$(dicom_hdr $dicomfile | grep 'ACQ Phase Encoding Direction' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local flipang=$(dicom_hdr $dicomfile | grep 'ACQ Flip Angle' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local sar=$(dicom_hdr $dicomfile | grep 'ACQ SAR' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local soundb=$(dicom_hdr $dicomfile | grep 'ACQ DB' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	local vers=$(dicom_hdr $dicomfile | grep 'ACQ Software Version' | sed 's/.*\[.*\/\/\(.*\)/\1/')
-	# Create Text
-	metadatum=$(cat <<-EOF
-\n\n
---------------------------------------------------------------\n
-${seriesname}\n
-${ser}\n
-PI\t\t\t${piname##PI\'s^}\n
-Study Description\t${studydesc}\n
-Scan Date\t\t${scandate}\n
-Session Start Time\t${sesstime}\n
-Sequence Start Time\t${scantime}\n
-\n
-Subject ID\t\t${subject}\n
-Age\t\t\t${age}\n
-Sex\t\t\t${sex}\n
-Weight(kg)\t\t${wgt}\n
-\n
-\n
-Acquisition Hardware -- ${manufacturer}\n
-Acquisition Software -- ${vers}\n
-\n
-Internal Sequence Name\t\t${seqname}\n
-Scanning Parameters ::\n
-\n
-\tMagnetic Field Str\t${tesla}T\n
-\tRepetition Time\t\t${rt} ms\n
-\tEcho Time\t\t${et} ms\n
-\tInversion Time\t\t${inversiontime} ms\n
-\tEcho Number\t\t${echnum}\n
-\tEcho Train Length\t${echtrl}\n
-\tPercent Sampling\t${persamp} %\n
-\n
-\tFlip Angle\t\t${flipang} deg\n
-\tPhase Encoding\t\t${phzencd}\n
-\tPhase Encoding Steps\t${phaseencstps}\n
-\tPercent Phase FOV\t${perfov}%\n
-\n
-\tSlice Thickness\t\t${thk}mm\n
-\tSlice Spacing\t\t${slcspacing}mm\n
-\n
-\tImaging Frequency\t${imgf}Hz\n
-\tImaging Atom\t\t${imgnuc}\n
-\n
-Patient Safety ::\n
-\tSAR\t\t${sar}\n
-\tSound (dB)\t\t${soundb}\n
-Sequence Description\t${seriesname}\n
-;
-EOF
-)	
-## Print metadatum out to be captured as output from parallel
-echo ${metadatum}
-#
-#
-#end function
-}
-# Export Function for Parallelization
-export -f fetchdicom_parsedcmheader
-##
-# Define Function 
-## Retrieve Meta Data About Studies on This Day
-function fetchdicom_parsestudies(){
-	# array of series (equals -> num studies * (num series study 1 + num series study 2 + .. num series study N) )
-	series_array=()
-	# keep list of number of series for each study, number of series per study are counted in the for loop
-	numseries_array=()		
-	# list of meta data for each acquired series (i.e MoCo, Localizer, MPRAGE, rest, etc.)
-	metadata_array=()
-	# index for loop
-	study_index=0
-	printf "Parsing Studies:\n"
-	# Begin loop over studies
-	while [ "${study_index}" -lt "${numstudies}" ]; do
-		echo -n '.'
-		## TODO
-		## Make this dependent on .IMA file NOT the .SER or .ACQ directory naming convention
-		## - use a find operation to find paths to .IMA then breakdown then iterate over those?
-		## - figure out how to parse output to parse dcmheader (should be doable.. and simpler!)
-		# check for existence of series in session
-		series=$(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}')
-		if [ -z "${series}" ]; then
-			echo -e "\n -- WARNING -- No Series Exist for Study ${studies_array[study_index]}.. skipping ${studies_array[study_index]}"
-		else
-			# build an indexed array of studies
-			series_array+=($(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}')) # ${studies_array[study_index]} works because it's within ${ ... } brackets.
-			# how many series are in each study? build an array we can index by study number (in alphanumeric order)
-			numseries_array+=("$(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}' | wc -l) ")
-			# what are the total number of series that have been added to the series array thus far? use this with number of series in each study to only get series belonging to study number.. simple subtraction yo!
-			series_array_size=$(echo ${#series_array[*]})
-			# what is the current position in the series array? i.e. how many series in this study (use with series_array_size to get index for series belonging just to the study in the current loop cycle)
-			numseries_in_this_study=${numseries_array[*]:study_index}
-			# now that we have a list of series belonging to the study, let's loop across them in parallel and fetch their metadata
-			# -- capture output of fetchdicom_parsedcmheader as an array
-			## TODO ;; optimize parallel
-			capture_output=$(parallel -k fetchdicom_parsedcmheader {} ::: ${series_array[*]:series_array_size-numseries_in_this_study})
-			# -- in order to add each set of metadata as an array we must modify the default field seperator to something that specifies a delimitation between each entry
-			local SAVEIFS=${IFS} && local IFS=$';' && metadata_array+=(${capture_output}) && local IFS=${SAVEIFS}
-			((study_index++))
-		fi
-	done
-#
-# end function
-}
-# Define Function
-## Retrieve & Format Meta Data for Study
-function fetchdicom_parsestudy(){
-	local study="${stu}" 
-	# capture series
-	local series=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Sequence Description//p')
-	# capture age
-	local age=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Age//p' | uniq)
-	# capture sex
-	local sex=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Sex//p' | uniq)
-	# capture weight
-	local weight=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Weight(kg)//p' | uniq)
-	# capture PI
-	local PI=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n "s/PI's^//p" | uniq | sed "s/Study Description//")
-	# capture scandate
-	local scandate=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Scan Date//p' | uniq)	
-	# capture session time
-	local sessionstarttime=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n "s/Session Start Time//p" | uniq | sed 's/\..*//' | sed 's/.\{4\}/&:/; s/.\{7\}/&:/')
-	[ -z "${PI}" ] && PI="<unknown>"
-local subject_info=$(cat <<-EOF
-\n
-♔ Study PI: ${PI}\n
-✎ SID: ${subjects[study_index]}\n
-✎ Session Date: $(date -d ${scandate} '+%b %d %Y')\n
-\n
-✎ Age:${age}\n
-✎ Sex:${sex}\n
-✎ Wgt:${weight}\n
-✎ Series (In Order Acquired)  ‣  Session Start Time: ${sessionstarttime}
-EOF
-)
-echo -e ${subject_info}
-echo "${series}" | nl
-#echo -e ${metadata_array[*]:running_total:numseries_array[study_index]}
-}
-# Define Function
-## Select Desired Series
-function fetchdicom_selectseries(){
-	echo 'work in progress'
-}
-# Define Function
-## Copy Data in Parallel
-function fetchdicom_copydata(){
-	# get name of desired series (this should be an input from fetchdicom_selectseries )
-	## note how all leading tabs, trailing spaces and commas are removed and replaced with underscores.. numers are prepended to indicate order and prevent merging
-	series=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Sequence Description//p' | nl | awk '{$1=$1};1' | tr -s ',' ' ' | tr -s ' ' '_')
-	# first create folders
-	parallel -k mkdir -p "${o}"/"${s}"/"{}" ::: "${series}"
-	# now copy all series into correct folder
-	## TODO :: add functionality for session
-	parallel -k --link --bar cp -r "{1}/* ${o}/${s}/{2}/" ::: "${series_files[@]}" ::: "${series}"
-}
-# Define Function
-## Parse Meta-Data
-function fetchdicom_dataseek(){
-	# count number of eleements
-	numstudies=${#studies_array[*]}
-	# Parse the Studies 
-	fetchdicom_parsestudies
-	#echo -e "🗒  ${numstudies} Studies Found..." # print number of studies found on this date
-	# get list of subjects acquired on this day
-	subjects=($(echo -e ${metadata_array[*]} | grep 'Subject ID' | uniq | awk '{print $NF}'))
-#	echo found ... ${subjects[@]}
-#	echo in sessions ${studies_array[@]}
-	# index for loop
-	study_index=0
-	# running total of num series elapsed (used to index metadata array)
-	running_total=0	
-	# print all subjects scanned on this date if no specific subject is input
-	if [ -z "${s}" ]; then
-	    echo 'Printing List of Subjects Scanned on This Day'
-		# loop over studies	and print information
-		for stu in "${studies_array[@]}"; do # need to use @ instead of * to get delimited output (each sub as opposed to all subs on one line)
-			fetchdicom_parsestudy ${stu} # would be great to keep variables local and pass as arguments (need to figure out arrays)
-			((running_total+=${numseries_array[study_index]}))
-			((study_index++))
-		done
-		# index for loop
-		study_index=0 && running_total=0				
-	fi		
-	# cross reference subject list with the subject you are looking for	
-	if [ ! -z "${s}" ]; then
-		# loop over subjects and find indices
-		## TODO - add ability to select specific series (use enumeration)
-		for sub in "${subjects[@]}"; do
-			if [ "${s}" = "${sub}" ]; then
-				### TODO make this part cleaner.. so that information about subject is printed
-				fetchdicom_parsestudy && series_files=(${series_array[*]:running_total:numseries_array[study_index]}) && fetchdicom_copydata && flag='subjectfound'
-				echo -e "$(fetchdicom_parsestudy)"${metadata_array[*]:running_total:numseries_array[study_index]}"\n\nThis file was generated on $(date) by $(whoami)@$(hostname)\n\n" > ${o}/${s}/session-info.txt
-				#break
+	# Check for macOS dependencies
+    if [ $(uname) = 'Darwin' ]; then
+    	# Check for macOS package manager
+    	if [ -z $(which brew) ]; then
+	    	echo -e "\n\t${YELLOW}WARNING: Missing Program${NC}\tPackage Manager Homebrew does not appear to be properly installed..\n\n\tWould you like to install Homebrew, the missing package manager for OS X (highly recommended) (y/n)" >&2 && read response
+	    	if [ "${response}" = "y" ] || [ "${response}" = "Y" ]; then
+	            if ruby -e "$(curl -fsSL https://raw.githubSERVERUSERcontent.com/Homebrew/install/master/install)"; then
+	            	echo ''
+	            else
+	            	echo -e "${RED}Failed Installation :: ${GREEN}homebrew" >&2
+	            	EXIT=1
+	            fi
+	        elif [ "${response}" = "n" ] || [ "${response}" = "N" ]; then
+	        	EXIT=1
+	        else
+	        	fetchdicom_dependencies
+	        fi
+	    fi
+        # Loop and check for missing software that can be installed with homebrew
+        local dependencies="dcm2niix git git-crypt git-annex parallel sshfs tree" && local missing=""
+        for dependency in ${dependencies}; do
+        	if [ -z "$(which ${dependency})" ]; then
+        		missing="${missing} ${dependency}"
+        	fi
+        done
+        # Now install the missing software
+        if [ "${missing}" ]; then
+        	echo -e "${YELLOW}Missing Software :: ${GREEN}${missing}" >&2
+        	if brew install ${missing}; then
+        		echo ''
+        	else
+        		echo -e "${RED}Failed Installation :: ${GREEN}${missing}" >&2
+        		EXIT=1
+        	fi
+        fi
+        # Check if osxfuse is installed
+        if [ -z $(brew cask list | grep 'osxfuse') ]; then
+        	echo -e "${YELLOW}Missing Software :: ${GREEN}osxfuse" >&2
+        	if brew cask install osxfuse; then
+        		echo ''
+        	else
+        		echo -e "${RED}Failed Installation :: ${GREEN}osxfuse" >&2
+        		EXIT=1
+        	fi
+        fi                
+        # Check if pip is installed, if not then install anaconda
+        if [ -z $(which pip) ]; then
+        	echo -e "${YELLOW}Missing Software :: ${GREEN}pip, anaconda" >&2
+        	if brew install caskroom/cask/anaconda && export PATH=/usr/local/anaconda3/bin:"$PATH"; then
+        		echo ''
+        	else
+        		echo -e "${RED}Failed Installation :: ${GREEN}anaconda" >&2
+        		EXIT=1
+        	fi
+        fi
+        # Install datalad - we use this to version control the database
+        if [ -z $(which datalad) ]; then
+        	echo -e "${YELLOW}Missing Software :: ${GREEN}datalad" >&2
+        	if pip install datalad; then
+        		echo ''
+        	else
+        		echo -e "${RED}Failed Installation :: ${GREEN}pip" >&2
+        		EXIT=1
+        	fi
+        fi
+        # Install dcm2bids
+        if [ -z $(which dcm2bids) ]; then
+        	echo -e "${YELLOW}Missing Software :: ${GREEN}dcm2bids" >&2
+			if git clone https://github.com/cbedetti/Dcm2Bids.git ${HOME}/Dcm2Bids; then
+				echo ''
+			else
+				EXIT=1 && fetchdicom_exit
 			fi
-			((running_total+=${numseries_array[study_index]}))			
-			((study_index++))
-		done	
-		#[ -z "${flag}" ] && echo "ERROR SUBJECT NOT FOUND ON ${y}-${m}-${d}" && exit
-	fi
-	##
-	##
+			cd ${HOME}/Dcm2Bids 
+			if pip install .; then
+				cd ${CWD}
+				echo ''
+			else
+				echo -e "${RED}Failed Installation :: ${GREEN}dc2mbids" >&2
+				EXIT=1
+			fi
+		fi        
+    elif [ "$(uname)" = 'Linux' ]; then
+  #   	if [ -z $(which dcm2niix) ]; then
+  #   		git clone https://github.com/rordenlab/dcm2niix.git ${HOME}/dcm2niix
+  #   		cd ${HOME}/dcm2niix && mkdir build && cd build && cmake .. && make
+		# fi    		
+		if [ -z $(which dcm2niix) ] || [ -z $(which tree) ] || [ -z $(which git) ] || [ -z $(which git-annex) ] || [ -z $(which git-crypt) ] || [ -z $(which parallel) ] || [ -z $(which datalad) ] || [ -z $(which dcm2bids) ]; then
+			echo -e "${YELLOW}Install of packages dcm2biix, tree, git, git-annex, git-crypt, parallel, datalad, dcm2bids not supported on LINUX ${NC}\n\t- Please install these packages on your own\n\t- You can contribute to this repo by submitting a pull request for this missing feature" >&2
+			EXIT=1    	
+		fi
+    else
+    	echo -e "${BRED}Error: ${NC}unrecognized OS ${YELLOW}$(uname)" >&2
+    	EXIT=1
+    fi
+    echo '  ⚙️ ---> dependency check complete '$EXIT
+    fetchdicom_exit	
 }
 # Define Function
 ## Run sequence of functions for getting data
 function fetchdicom_run(){
 	# Parse Options
-	fetchdicom_parseoptions "$@"
-	# Check that all dependencies are installed
+	fetchdicom_parseoptions "${OPTIONS}"
+	# Install all dependencies, set up ram disk and initialize configuration
+	[ "${INSTALL}" ] && fetchdicom_install
+	[ "${CONFIG}" ] && fetchdicom_config
+	# [ "${BUILD}" ] && fetchdicom_createdb
+	# [ "${UPDATE}" ] && fetchdicom_updatedatabase
+}
+# Define Function
+## Check for exit signal
+function fetchdicom_exit(){
+	if [ ${EXIT} ]; then
+		cd ${DATABASEDIR} && datalad add * && datalad save && cd ${CWD}
+		echo -e "\n${RED}...exiting\n"
+		exit
+	fi
+}
+# Define Function
+function fetchdicom_declarations(){
+	CWD=$(pwd) # Current Working Directory @ Time of Execution
+	RED='\033[0;31m' && BRED='\033[1;31m' && YELLOW='\033[1;33m' && GREEN='\033[1;32m' && BLUE='\033[1;34m' && GREY='\033[1;37m' NC='\033[0m' # Colors
+	# Database meta-data settings
+	[ ! ${DATABASEDIR} ] && DATABASEDIR=${HOME}'/.dicom.db'
+	[ ! ${DATABASE_SHARETYPE} ] && DATABASE_SHARETYPE='group'
+	DATABASECONFIGFILE=${DATABASEDIR}/${DATABASE}.config
+	# Remote server settings
+	# [ ! ${SERVERUSER} ] && SERVERUSER=''
+	# [ ! ${SERVER} ] && SERVER=''
+	# DICOM DB settings
+	[ ${SERVERUSER} ] && [ ${SERVER} ] && DICOMDATADIR=${DATABASEDIR}/${SERVERUSER}@${SERVER}.DICOMS
+	[ ! ${DCMPARENTDIR} ] && DCMPARENTDIR='.SER'	# Extension for Direct Parent of .IMA files
+	[ ! ${DCMEXTENSION} ] && DCMEXTENSION='.IMA' # Extension of DICOM files	
+	# Settings for RAM disk
+	[ ! ${RAMDISK} ] && RAMDISK='DICOMDB.RAMDISK'
+	[ ! ${RAMDISKSIZE} ] && RAMDISKSIZE_MB=8192 
+	# [ ! ${GPGCONFIGCHECK} ] && GPGCONFIGCHECK='' && [ ! ${GITCRYPTCHECK} ] && GITCRYPTCHECK=''
+	# Default exit setting
+	EXIT=''
+	echo '  ⚙️ ---> declarations complete '
+}
+# Define Function
+function fetchdicom_install(){
+	## pre install check
+	if [ -f ${DATABASEDIR}/.installed ]; then
+		echo "This program appears to have already been installed.  Reinstall? [y/n]" && read response
+		if [ "${response}" = 'y' ] || [ "${response}" = 'Y' ]; then
+			rm ${DATABASEDIR}/.installed
+		elif [ "${response}" = 'n' ] || [ "${response}" = 'n' ]; then
+			EXIT=1 && fetchdicom_exit
+		else
+			echo "${YELLOW} Incorrect response.. try again" && fetchdicom_install
+		fi
+	fi
+	## Begin Install
+	# Declare default variables, install dependencies, set up shop
+	fetchdicom_declarations
 	fetchdicom_dependencies
-	# Check that the raw data path exists
-	fetchdicom_checkdataexists
-	# Traverse raw data tree and find dicom paths
-	fetchdicom_dataseek
+	fetchdicom_config
+	##
+	# post install check
+	if [ -d ${DATABASEDIR} ] && [ ${EXIT} ] && [ -f ${DATABASECONFIGFILE} ]; then 
+		touch ${DATABASEDIR}/.installed
+	else
+		fetchdicom_config
+	fi
+	## check for exit signal
+	fetchdicom_exit
+}
+# Define Function
+function fetchdicom_config(){
+	clear && printf '\e[3J'
+	fetchdicom_declarations && fetchdicom_config.status	
+	[ -f ${DATABASECONFIGFILE} ] && fetchdicom_config.load ${DATABASECONFIGFILE}
+	echo -e "\n${BLUE}🧠 💽 DICOM Database Configuration:${NC} ${DATABASE}"
+	# Show list of configuration items
+	echo -e "\n1]\t${DATABASECONFIG}Create/Download Database\n${NC}2]\t${RAMDISKCONFIG}Configure Dedicated RAM Disk \n${NC}3]\t${SSHFSCONFIG}Set up SSHFS For Mounting Remote Server Data\n${NC}4]\t${GREY}Set up ${GPGCONFIG}GNU Privacy Guard Encryption Keys ${GREY}and ${GITCRYPTCONFIG}initialize git-crypt ${GREY}(Recommended)\n\n${NC}(color key: ${GREY}unconfigured/${GREEN}configured${NC})\n\n${NC}Enter line # (1-4) or (s)how/(d)one"
+	read response
+	# echo '  ⚙️ ---> config input '${response}
+	if [ "${response}" = '1' ]; then
+		fetchdicom_config.database
+	elif [ "${response}" = '2' ]; then
+		fetchdicom_config.ramdisk
+	elif [ "${response}" = '3' ]; then
+		fetchdicom_config.sshfs
+	elif [ "${response}" = '4' ]; then
+		fetchdicom_config.gpg
+	elif [ "${response}" = 'd' ] || [ "${response}" = 'done' ]; then
+		EXIT=1 && [ -d ${DATABASEDIR} ]
+		[ -f ${DATABASECONFIGFILE} ] && fetchdicom_config.write
+		fetchdicom_exit
+	elif [ "${response}" = 's' ] || [ "${response}" = 'show' ]; then
+		if cat ${DATABASECONFIGFILE} | column -t -c 3 -s '#'; then
+			read -p "⏎   to continue" && fetchdicom_config
+		else
+			echo -e "${YELLOW}Configuration file contents have not been set, please proceed with configuration${NC}" && read -p '⏎  to continue.. >> ' && fetchdicom_config
+		fi
+	else
+		echo -e "${YELLOW}Incorrect Response, try again" >&2 && read -p "⏎   to continue"
+		fetchdicom_config
+	fi
+}
+# Define Function
+function fetchdicom_config.status(){
+	DATABASECONFIG=${GREY} # default
+	RAMDISKCONFIG=${GREY}  # default
+	SSHFSCONFIG=${GREY}
+	GPGCONFIG=${GREY}
+	GITCRYPTCONFIG=${GREY}
+	[ -f ${DATABASEDIR}/${DATABASE}.config ] && DATABASECONFIG=${GREEN} # indicate if database is installed/initialized
+	[ "$(mount | grep ${RAMDISK})" ] && RAMDISKCONFIG=${GREEN}  #
+	[ "$(mount | grep "${SERVERUSER}@${SERVER}:${REMOTEDICOMDIR}")" ] && SSHFSCONFIG=${GREEN}	
+	[ "${GPGCONFIGCHECK}" ] && GPGCONFIG=${GREEN}
+	[ "${GITCRYPTCHECK}" ] && GITCRYPTCONFIG=${GREEN}
+	echo '  ⚙️ ---> status check '
+}
+# Function Definition
+function fetchdicom_config.load(){
+    local file=${1}
+    while read var; do
+		eval ${var}
+    done < ${file}
+    echo '  ⚙️ ---> loading '${1}' into namespace'
+}
+# Function Definition
+function fetchdicom_config.write(){
+	if [ ! -f ${DATABASECONFIGFILE} ]; then
+		echo -e "${YELLOW}Configuration file ${DATABASECONFIGFILE} does not exist. Please create/get dataset first.  " >&2 && read -p "⏎   to continue" &&  fetchdicom_config
+	fi
+cat <<EOF > ${DATABASECONFIGFILE}
+export DATABASECONFIGFILE=${DATABASECONFIGFILE} #Location of configuration file
+export DATABASE=${DATABASE}	#Nickname of database
+export DATABASE_SHARETYPE=${DATABASE_SHARETYPE} #Is database accessible to more than one SERVERUSER?
+export DATABASESOURCE=${DATABASESOURCE} #Where did database come from
+export DATABASEDIR=${DATABASEDIR} #Where does database live
+export DICOMDATADIR=${DICOMDATADIR} #Where is DICOM data
+export SERVERUSER=${SERVERUSER} #SERVERUSER for remote server
+export SERVER=${SERVER} #Address for remote server
+export REMOTEDICOMDIR=${REMOTEDICOMDIR} #Location of data on remote server
+export RAMDISK=${RAMDISK} #Name of ram disk
+export RAMDISKSIZE_MB=${RAMDISKSIZE_MB} #Size (MB) of ram disk
+export IDENTITY=${IDENTITY} #GPG identity
+export DCMPARENTDIR=${DCMPARENTDIR}	#Extension for Direct Parent of .IMA files
+export DCMEXTENSION=${DCMEXTENSION} #Extension of DICOM files	
+EOF
+	cd ${DATABASEDIR}
+	if git commit -am "${DATABASE} configuration file update"; then
+		cd ${CWD}
+	else
+		echo -e "${YELLOW}Warning: ${NC} no updates were committed..\n\n"
+	fi
+	# Load the default settings into environment and print them to screen for SERVERUSER to edit
+	echo '  ⚙️ --->  wrote configuration file to '${DATABASECONFIGFILE}
+	fetchdicom_config.load ${DATABASECONFIGFILE}
+}
+# Function Definition
+## Initialize DICOM database
+function fetchdicom_database.init(){
+	fetchdicom_declarations
+	echo -e "\nInitializing ${DATABASE} in ${DATABASEDIR}"
+	[ ! -d ${DATABASEDIR} ] && datalad create ${DATABASEDIR} --shared-access="${DATABASE_SHARETYPE}"
+	[ ! -d ${DATABASEDIR}/${DATABASE} ] && datalad create ${DATABASEDIR}/${DATABASE} --shared-access="${DATABASE_SHARETYPE}"
+	[ ! -f ${DATABASECONFIGFILE} ] && touch ${DATABASECONFIGFILE}
+	cd ${DATABASEDIR}
+	if git add ${DATABASECONFIGFILE} && git commit -m "${DATABASE} configuration file initialized"; then
+		cd ${CWD}
+	else
+		echo -e "${YELLOW}Warning: ${NC} no updates were committed..\n\n" && EXIT=1 && fetchdicom_exit
+	fi
+	if datalad add ${DATABASEDIR} && datalad save ${DATABASEDIR}; then
+		echo -e "☑️  ${GREEN}Database installed at local path :: ${DATABASEDIR}/${DATABASE}${NC}" >&2 && read -p "⏎   to continue"
+	else
+		echo -e "${RED}Error: ${NC} install of ${DATABASEDIR} failed..\n\n" && EXIT=1 && fetchdicom_exit
+	fi
+}
+# Function Definition
+## Download database from source
+function fetchdicom_database.get(){
+	DATABASESOURCE=${1}
+	DATABASE=${2}
+	if datalad install --get-data -s ${DATABASESOURCE} ${DATABASEDIR}/${DATABASE}; then
+		cd ${DATABASEDIR}/${DATABASE} && git annex sync
+	else
+		echo -e "${BRED}Unable to retrieve database ${NC}please try again..\n\n" && fetchdicom_config.database
+	fi
+}
+# Function Definition
+## 
+function fetchdicom_database.build(){
+	echo -e "\n❍ Building A Version-Controlled & Encrypted Database Index of All DICOM Data in ${r}"
+	echo -e "\n⏳  Finding All DICOM Parent Directories (*${DCMPARENTDIR}/) in $(tree --du --si -C -D -L 1 ${r})\n\t..this will take a while ☕️"
+	# Find all series and write to file
+	find ${r} -type d -name "*${DCMPARENTDIR}" > ${DATABASEDIR}/seriespaths.tsv && git -am "First Commit :: Path to DICOM Parent Directories"
+	# Loop across series and parse dicom header
+	echo -e "\n\n🧠 🔦 Parsing DICOM Headers for Session Metadata with dcm2niix\n\t..this can also take a long time ⏳ ⏳"
+	parallel -a ${DATABASEDIR}/seriespaths.tsv -k --link --bar dcm2niix -b o -ba n -f '%f_%t' -o ${DATABASEDIR} > /dev/null
+	# Insert path to series in json file
+	find ${DATABASEDIR} -type f -name '*.json' | parallel -k --link --bar 
+}
+# Function Definition
+function fetchdicom_database.query(){
+	echo 'test'
+}
+# Setup RAM Disk for speedy operations
+function fetchdicom_ramdisk(){
+	# set your RAM size in block size: ie) # desired megabytes * 2048
+	RAMBLOCKSIZE=$(expr ${RAMDISKSIZE_MB} \* 2048)
+	[ $(uname) = 'Darwin' ] && diskutil erasevolume HFS+ ${RAMDISK} `hdiutil attach -nomount ram://${RAMBLOCKSIZE}` && RAMDISK='/Volumes/'${RAMDISK}
+	[ $(uname) = 'Linux' ] && echo -e "${YELLOW}RAM Disk Database Operations are Not Supported on Linux yet\n\t${NC}- You can contribute to this repo by submitting a pull request for this missing feature" && EXIT=1 && fetchdicom_exit
+	# install database on the ram disk
+	datalad install --get-data -s ${DATABASEDIR}/${DATABASE} ${RAMDISK}/${DATABASE}
+	echo ln -s ${DATABASEDIR}/${DATABASE}.config ${RAMDISK}/${DATABASE}.config
+	ln -s ${DATABASEDIR}/${DATABASE}.config ${RAMDISK}/${DATABASE}.config
+	echo -e "\nRAM Disk Exists.. syncing with source database"
+	cd ${DATABASEDIR}/${DATABASE} && git annex sync && cd ${CWD}
+	DATABASEDIR=${RAMDISK} 
+}
+# Function Definition
+##
+function fetchdicom_ramdisk.unmount(){
+	if [ "$(mount | grep ${RAMDISK})" ]; then
+		# First sync everything in database to origin
+		if [ -d "$(mount | grep ${RAMDISK} | awk '{print $3}')/${DATABASE}" ];
+			cd $(mount | grep ${RAMDISK} | awk '{print $3}')/${DATABASE}; then
+			if git annex sync; then
+				cd ${CWD}
+			else
+				echo -e "${BRED}Error: Syncing RAM Disk Working Directory to Database, git annex sync failed in ${RAMDISK}/${DATABASE}" >&2 && EXIT=1 && fetchdicom_exit
+			fi
+		fi				
+		# Now unmount
+		if umount $(mount | grep ${RAMDISK} | awk '{print $3}'); then					
+			echo -e "${GREEN} Unmount for ${RAMDISK} was successful${NC}"
+		else
+			echo -e "${YELLOW}Warning: Cannot unmount ${RAMDISK} - trying forceful" >&2
+			if diskutil umount force $(mount | grep ${RAMDISK} | awk '{print $3}'); then
+				echo -e "${GREEN} Forceful unmount for ${RAMDISK} was successful${NC}"	
+			else
+				echo -e "${BRED}Error: Cannot unmount ${RAMDISK}" >&2 EXIT=1 && fetchdicom_exit
+			fi
+			echo -e "\n${GREY}Configuration of Dedicated RAM Disk for Database${NC}\n\nSpeed-optimized database operations can be conducted on a RAM disk partitioned from total available memory.\n"
+		fi
+	fi	
+}
+# Define function
+function fetchdicom_mountserver(){
+	DICOMDATADIR=${DATABASEDIR}/${SERVERUSER}@${SERVER}.DICOMS
+	[ ! -d ${DICOMDATADIR} ] && mkdir -p ${DICOMDATADIR} && echo ${DICOMDATADIR} >> .gitignore
+	if sshfs ${SERVERUSER}@${SERVER}:${REMOTEDICOMDIR} ${DICOMDATADIR} -o cipher=arcour,kernel_cache,defer_permissions,follow_symlinks,reconnect; then
+		SSHFSCONFIG='${GREEN}'
+	else
+		echo -e "${RED}Error: mount of remote data source failed" && EXIT=1 && fetchdicom_exit
+	fi
+}
+# Function Definition
+## Configure New/Existing Databse
+function fetchdicom_config.database(){
+	clear && printf '\e[3J'
+	echo -e "\n${GREY}Database Configuration\n\n${NC}⁍ A database is defined as a git version-controlled directory managed with the ${BLUE}datalad${NC} utility. \
+		\n\n⁍ A database can be built from scratch given a path to existing data or can be downloaded with ssh/rsync/http protocol.\n\t(note: ${BLUE}'git clone'${NC} command is used to obtain existing data)\
+		\n\nWould you like to install an existing database or build a new one from scratch?\n"
+	read -p "enter (n)ew, (e)xisting or (q)uit >> " response
+	if [ "${response}" = "n" ] || [ "${response}" = "new" ] || [ "${response}" = "N" ] || [ "${response}" = "New" ]; then
+		echo -e '\nPlease enter a nickname for this database. e.g.) mydicomdb' && read response
+		DATABASE=${response} && DATABASECONFIGFILE='' && fetchdicom_declarations && fetchdicom_database.init && fetchdicom_config.write && fetchdicom_config
+	elif [ "${response}" = "e" ] || [ "${response}" = "existing" ] || [ "${response}" = "Existing" ] || [ "${response}" = "E" ] || [ "${response}" = "Exist" ] || [ "${response}" = "exist" ]; then
+		echo -e "\nPlease type the path to the existing database.\n\tHint) This can be a full local file path like:\n\t\t'~/folder/mydatabase'\n\tor a remote server path like:\n\t\t'ssh://SERVERUSER@server:22/folder/mydatabase'\nEnter path" && read response
+		echo '\nPlease enter a nickname for this database. e.g.) mydicomdb\n' && read secondresponse
+		fetchdicom_database.get ${response} ${secondresponse}
+	elif [ "${response}" = "q" ]  || [ "${response}" = "Q" ]; then
+		fetchdicom_config
+	else
+		echo -e "${BRED}Incorrect response.. ${NC}please type n/new or e/existing..\n\n" && sleep 1 && fetchdicom_config.database
+	fi
+}
+# Define Function
+## Configure RAMDISK
+function fetchdicom_config.ramdisk(){
+	clear && printf '\e[3J'
+	echo -e "\n${GREY}Configuration of Dedicated RAM Disk for Database${NC}\n\nSpeed-optimized database operations can be conducted on a RAM disk partitioned from total available memory.\n"
+	# Check if disk is already mounted and present user with options
+	if [ "$(mount | grep ${RAMDISK})" ]; then
+		# Reconfigure disk?
+		echo -e "${YELLOW}Warning: RAM DISK already exists\n\n${NC}Would you like to remove and reconfigure the RAM disk?"
+		read -p "(u)nmount/(r)econfigure/(q)uit >> " response
+		if [ "${response}" = 'q' ] || [ "${response}" = 'quit' ]; then
+			fetchdicom_config
+		elif [ "${response}" = 'u' ] || [ "${response}" = 'umnount' ]; then
+			fetchdicom_ramdisk.unmount && fetchdicom_config
+		elif [ "${response}" = 'r' ] || [ "${response}" = 'reconfigure' ]; then
+			echo ".."
+		else
+			echo -e "${YELLOW}Incorrect Response, try again${NC}" >&2 && read -p "⏎   to continue"			
+			fetchdicom_config.ramdisk
+		fi
+	fi
+	echo -e "\nDefault settings are to create a ${RAMDISKSIZE_MB}MB partition. Would you like to modify this value?" && read -p "y/n/(q)uit>> " response
+	if [ "${response}" = 'y' ] || [ "${response}" = 'Y' ]; then
+		printf "\r"
+		read -p "Enter desired size in Megabyte " RAMDISKSIZE_MB
+		if [ "${RAMDISKSIZE_MB}" -eq "${RAMDISKSIZE_MB}" ] 2>/dev/null; then
+			fetchdicom_config.write
+		else
+			echo -e "${YELLOW}Input must be numeric.. ${NC}" && read -p "⏎   to try again, control + c to quit " && fetchdicom_config.ramdisk	
+		fi
+	elif [ "${response}" = 'n' ] || [ "${response}" = 'N' ]; then
+		echo 'continuing..'
+	elif [ "${response}" = 'quit' ] || [ "${response}" = 'q' ] || [ "${response}" = 'Q' ]; then
+		echo 'exiting RAM disk configuration' && fetchdicom_config
+	else
+		echo -e "${BRED}Incorrect response.. ${NC}please type y/n ... n\n" && read -p "⏎   to continue" && fetchdicom_config.ramdisk
+	fi
+	# create RAM disk here
+	if fetchdicom_ramdisk; then
+		RAMDISKCONFIG=${GREEN}
+		echo -e "${GREEN}Successful creation of RAM DISK${NC}" && read -p "⏎   to continue"
+	else
+		RAMDISKCONFIG=${RED}
+		echo -e "${BRED}RAM DISK creation FAILED${NC}\n\n" && read -p "⏎   to continue"
+	fi
+	fetchdicom_config
+}
+# Function Definition
+## Configure SSHFS mount
+function fetchdicom_config.sshfs(){
+	clear && printf '\e[3J'
+echo -e "${GREY}Secure Shell FileSystems (SSHFS) Configuration\n\n${NC}⁍ SSHFS is a tool that allows mounting remote directories unto your local file system. In other words, you can view a folder from a computer across the internet as if it was attached like an external hard drive.\n\n⁍ To set up SSHFS you will need the ip address (xxx.xxx.xxx.x) or domain name (xxxx.com or xxxx.local) of the remote computer and a SERVERUSER account to log in with on that computer.\n"
+read -p "Would you like to continue? (y/n)  >> " response
+	if [ "${response}" = y ] || [ "${response}" = Y ]; then
+		echo -e "\nPlease enter the remote server address\n  "
+		read SERVER
+		echo -e "\nPlease enter the SERVERUSER account for the remote server\n  "
+		read SERVERUSER
+		echo -e "\nEnter the directory on the remote server you would like to mount on your machine\n  "
+		read REMOTEDICOMDIR
+		fetchdicom_mountserver
+	elif [ "${response}" = n ] || [ "${response}" = N ]; then
+		echo 'Exiting SSHFS Configuration'
+	fi
+	fetchdicom_config
+}
+# Function Definition
+## initialize git crypt
+function fetchdicom_config.gitcrypt(){
+	clear && printf '\e[3J'
+	echo -e "\n🔐 ${GREY}Configuring Encrypted Version Control"
+	echo -e "\n\t- Initializing git crypt..." && cd ${DATABASEDIR}/${DATABASE}
+	if git crypt init; then
+		echo '*.json filter=git-crypt diff=git-crypt' > .gitattributes
+		fetchdicom_config.gpg
+		echo -e "\n\t - Adding authorized identity to repository.\nPlease Enter Full fingerprint/SERVERUSERid of Desired Key\n\tSERVERUSER ID example)\t\tJohn Doe <john@doe.com>\n\tFingerprint example)\t\t39CDD01"
+		read -s ${IDENTITY}
+		if git-crypt add-gpg-SERVERUSER ${IDENTITY}; then
+			GITCRYPTCHECK='true'
+		else
+			echo -e "${RED}Failed to add gpg identity ${IDENTITY} to git crypt" >&2
+			EXIT=1 && fetchdicom_exit			
+		fi
+	else
+		echo -e "${RED}Failed Initialization of Git Crypt" >&2
+		EXIT=1 && fetchdicom_exit
+	fi
+}
+# Define Function
+## Configure Encryption Keys with GNU Privacy Guard
+function fetchdicom_config.gpg(){
+echo -e "\n#{GREY}GNU Privacy Guard (GPG) Configuration\n\n${NC} GPG is used to manage and create encryption keys unique to your identity. These keys are used to lock any sensitive data within the DICOM database and to prevent unauthorized access.\n\nRead more about GPG and encryption here ::: ${BLUE}https://www.gnupg.org/gph/en/manual.html#INTRO\n\n"
+	# Check whether keys exist
+	if [ $(gpg --list-keys --keyid-format LONG) ]; then
+		printf "\nThe following keys are available on this system:\n\n $(gpg --list-keys --keyid-format LONG)\n\nWould you like to create a new identity (y/n)?"
+		read response
+	else
+		printf "\n\n${BRED}No Encryption Keys Found on This System${NC}\n\nWhat does this mean?\nThe DICOM database cannot be built without an active encryption key due to sensitive data found in the dicom metadata that must be stored for querying by authorized SERVERUSERs. Keys are created and managed with GNU Privacy Guard (https://www.gnupg.org/).\n\nWould you like to create a secure identity with associated keys? (y/n)\n" && read response
+	fi
+	# Create new key if SERVERUSER desires
+	if [ ${response} = "y" ] || [ ${response} = "Y" ]; then
+		if gpg --gen-key; then 
+			GPGCONFIGCHECK='true'
+		else
+			EXIT=1 && printf "\n${BRED}\tERROR: ${RED}gpg --genkey failed. ${NC}Cannot proceed without encryption keys\n" >&2 && fetchdicom_exit			
+		fi
+	elif [ ${response} = "n" ] || [ ${resonse} = "N" ]; then
+		# exit if no keys exist and SERVERUSER does not want keys, otherwise echo ''
+		if [ ! $(gpg --list-keys --keyid-format LONG) ]; then
+			EXIT=1 && printf "\n${BRED}\tERROR: ${NC}Cannot proceed without encryption keys\n" >&2 && fetchdicom_exit
+		else
+			echo '' 
+		fi
+	else
+		# start over if incorrect input
+		printf "\n${RED}\tERROR: ${NC}Incorrect Input ${response}\n" && fetchdicom_gpginit
+	fi	
+}
+# Function Definitions
+## Show the help documentation
+function fetchdicom_help(){
+	clear && printf '\e[3J'
+	fetchdicom_declarations
+cat <<EOF
+
+	Usage :: ${0##*/}
+
+EOF
 }
 # Redirect all standard input ($@) to run function and execute program
-fetchdicom_run "$@"
+fetchdicom_run "${OPTIONS}"
 #
 ##
