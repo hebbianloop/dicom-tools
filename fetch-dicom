@@ -26,6 +26,7 @@ private=''
 # Function Definitions
 ## Show the help documentation
 function fetchdicom_help(){
+	[ ! -z ${DEBUG} ] && echo "fetchdicom_help"
 	helpstr=$(cat <<-EOF
 
 	Usage :: ${0##*/} 	[-h|--help] [-r|--rawdatadir PATH] [-o|--outputdir PATH] [-s|--subject] 
@@ -57,6 +58,7 @@ EOF
 # Define Function
 ## Parse Input Arguments
 function fetchdicom_parseoptions(){
+	[ ! -z ${DEBUG} ] && echo "fetchdicom_parseoptions"
 	while :; do
 		case ${1} in
 			-h|--help)
@@ -66,6 +68,9 @@ function fetchdicom_parseoptions(){
 			-prv|--private)
 				private='omit identifiers'
 			;;
+			--debug)
+				DEBUG='debuggin'
+			;;			
 			-r|--rawdatadir)
 				if [ -n "${2}" ]; then
 					r=${2}
@@ -93,6 +98,15 @@ function fetchdicom_parseoptions(){
 					exit
 				fi
 			;;
+			-p|--pi)
+				if [ -n "${2}" ]; then
+					s=${2}
+					shift
+				else
+					echo -e "Error -p --pi requires a non-empty option argument.\n" >2&
+					exit
+				fi
+			;;			
         	-y|--year)
             	if [ -n "${2}" ]; then
                 	y=${2}
@@ -141,6 +155,7 @@ function fetchdicom_parseoptions(){
 # Define Function
 ## Check for dependencies
 function fetchdicom_dependencies(){
+	[ ! -z ${DEBUG} ] && echo "fetchdicom_dependencies"
 	# Check for AFNI
 	[ -z "$(which dicom_hdr)" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  AFNI does not appear to be properly installed.. exiting..." && exit
 	# Check for GNU Parallel
@@ -148,6 +163,7 @@ function fetchdicom_dependencies(){
 }
 ## TODO WORK IN PROGRESS ##
 function fetchdicom_builddatabase(){
+	[ ! -z ${DEBUG} ] && echo "fetchdicom_builddatabase"
 	DBname=$(echo $(hostname)${r} | sed 's_/_|_g')
 	[ ! -d ${HOME}/.fetch-dicom.db ] && mkdir -pv ${HOME}/.fetch-dicom.db
 	# check if ${r} is found in existing DB
@@ -157,6 +173,7 @@ function fetchdicom_builddatabase(){
 	## 2. Add protocol and parameters to series
 }
 function fetchdicom_traversetree(){
+	[ ! -z ${DEBUG} ] && echo "fetchdicom_traversetree"
     echo -e "\n🔍 Traversing DICOM Directory Tree: $(tree --du --si -C -D -L 1 ${r})  📂  Searching for Session Data"
     ## TODO THIS METHOD IS NOT EFFICIENT
     ## -- BUILD DATABSE OF FOLDER TREE, STORE IN GLOBAL FETCH-DICOM DATABASE.. QUERY DATABASE TO SEARCH AND FIND DATA
@@ -172,6 +189,7 @@ function fetchdicom_traversetree(){
 	# echo "${studies}"
 }
 function fetchdicom_traversetreebydate(){
+	[ ! -z ${DEBUG} ] && echo "fetchdicom_traversetreebydate"
 	# Search for DICOM Assuming Date Organized File Hierarchy
     ## substitute year, month or day with wildcard if missing	
     [ ! ${y} ] && y='*'
@@ -187,14 +205,15 @@ function fetchdicom_traversetreebydate(){
 	[ ! -d "${month}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Month ${m}.. exiting..." && exit
 	[ ! -d "${day}" ] && echo -e "\n❗️❗️  ERROR   ❗️❗️  Raw Data Does Not Exist for Specified Day ${y}-${m}-${d}.. exiting..." && exit    
 	## Create array of all studies in yyyy-mm-dd (wildcard compatible)
-	studies=$(ls -ld ${day}/*.STU | awk '{print $NF}')	
-	studies_array=($(ls -ld ${studies} | awk '{print $NF}'))
+	studies=$(find ${day}/ -name '*.STU' -type d -d 1)	
+	studies_array=($(find ${day}/ -name '*.STU' -type d -d 1))
 	# check for existence of sessions if date and subject name is given
 	echo -e "\n📂  Searching ${#studies_array[*]} Session(s) for Subject ${s} on date(s) $y-$m-$d\n"
 }
 # Define Function
 ## Check if subject data exists
 function fetchdicom_checkdataexists(){
+	[ ! -z ${DEBUG} ] && echo "fetchdicom_checkdataexists"
     # Search for input subject
     # TODO what if there is no input subject?
     #[ -z "${s}" ] && echo "📌  Must specify subject ID -- dev TODO: show list of PIs, Projects, Subjects & Dates to choose from" && fetchdicom_help && exit		
@@ -212,13 +231,16 @@ function fetchdicom_checkdataexists(){
 # Define Function
 ## 
 function fetchdicom_parsedcmheader(){
+	[ ! -z ${DEBUG} ] && echo "fetchdicom_parsedcmheader"
 	# Takes path to dicom file as input and cds to dicom file directory (dicom_hdr only works if dicom file is in cwd)
 	## TODO - make this just take the first folder in the list
+	find ${1} | head -1 
 	acqs=$(ls -dl ${1}/* | tail -n +1 | head -1 | awk '{print $NF}')
 	cd "${acqs}"
 	# No need to loop through .IMAs.. just grab meta data from first file in list
-	local dicomfile=$(ls -dl *.IMA | tail -n +1 | head -1 | awk '{print $NF}')
-	dicom_header=$(dicom_hdr $dicomfile)
+	# local dicomfile=$(ls -dl *.IMA | tail -n +1 | head -1 | awk '{print $NF}')
+	local dicomfile=$(find . -name '*.IMA' | head -n 1)
+	dicom_header=$(dicom_hdr ${dicomfile})
 	# Get Subject Name
 	subject=$(dicom_hdr $dicomfile | grep 'Patient Name' | sed 's/.*\[.*\/\/\(.*\)/\1/')
 	# Get Series Name
@@ -319,6 +341,7 @@ export -f fetchdicom_parsedcmheader
 # Define Function 
 ## Retrieve Meta Data About Studies on This Day
 function fetchdicom_parsestudies(){
+	[ ! -z ${DEBUG} ] && echo "fetchdicom_parsestudies"
 	# array of series (equals -> num studies * (num series study 1 + num series study 2 + .. num series study N) )
 	series_array=()
 	# keep list of number of series for each study, number of series per study are counted in the for loop
@@ -327,23 +350,22 @@ function fetchdicom_parsestudies(){
 	metadata_array=()
 	# index for loop
 	study_index=0
-	printf "Parsing Studies:\n"
+	#printf "::\n"
 	# Begin loop over studies
 	while [ "${study_index}" -lt "${numstudies}" ]; do
-		echo -n '.'
 		## TODO
 		## Make this dependent on .IMA file NOT the .SER or .ACQ directory naming convention
 		## - use a find operation to find paths to .IMA then breakdown then iterate over those?
 		## - figure out how to parse output to parse dcmheader (should be doable.. and simpler!)
 		# check for existence of series in session
-		series=$(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}')
+		series=$(find ${studies_array[study_index]}/ -name '*.SER' -type d -d 1)
 		if [ -z "${series}" ]; then
 			echo -e "\n -- WARNING -- No Series Exist for Study ${studies_array[study_index]}.. skipping ${studies_array[study_index]}"
 		else
 			# build an indexed array of studies
-			series_array+=($(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}')) # ${studies_array[study_index]} works because it's within ${ ... } brackets.
+			series_array+=($(find ${studies_array[study_index]}/ -name '*.SER' -type d)) # ${studies_array[study_index]} works because it's within ${ ... } brackets.
 			# how many series are in each study? build an array we can index by study number (in alphanumeric order)
-			numseries_array+=("$(ls -ld ${studies_array[study_index]}/*.SER | awk '{print $NF}' | wc -l) ")
+			numseries_array+=("$(find ${studies_array[study_index]}/ -type d -name '*.SER' | wc -l) ")
 			# what are the total number of series that have been added to the series array thus far? use this with number of series in each study to only get series belonging to study number.. simple subtraction yo!
 			series_array_size=$(echo ${#series_array[*]})
 			# what is the current position in the series array? i.e. how many series in this study (use with series_array_size to get index for series belonging just to the study in the current loop cycle)
@@ -352,6 +374,8 @@ function fetchdicom_parsestudies(){
 			# -- capture output of fetchdicom_parsedcmheader as an array
 			## TODO ;; optimize parallel
 			capture_output=$(parallel -k fetchdicom_parsedcmheader {} ::: ${series_array[*]:series_array_size-numseries_in_this_study})
+			##
+			echo -en " ➤ ${studies_array[study_index]} :: ${numseries_in_this_study} series found\n"
 			# -- in order to add each set of metadata as an array we must modify the default field seperator to something that specifies a delimitation between each entry
 			local SAVEIFS=${IFS} && local IFS=$';' && metadata_array+=(${capture_output}) && local IFS=${SAVEIFS}
 			((study_index++))
@@ -363,6 +387,7 @@ function fetchdicom_parsestudies(){
 # Define Function
 ## Retrieve & Format Meta Data for Study
 function fetchdicom_parsestudy(){
+	[ ! -z ${DEBUG} ] && echo "fetchdicom_parsestudy"
 	local study="${stu}" 
 	# capture series
 	local series=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Sequence Description//p')
@@ -373,7 +398,7 @@ function fetchdicom_parsestudy(){
 	# capture weight
 	local weight=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Weight(kg)//p' | uniq)
 	# capture PI
-	local PI=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n "s/PI's^//p" | uniq | sed "s/Study Description//")
+	local PI=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n "s/PI s^//p" | awk '{print $NF}' | uniq)
 	# capture scandate
 	local scandate=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Scan Date//p' | uniq)	
 	# capture session time
@@ -398,30 +423,41 @@ echo "${series}" | nl
 # Define Function
 ## Select Desired Series
 function fetchdicom_selectseries(){
+	[ ! -z ${DEBUG} ] && echo "fetchdicom_selectseries"
 	echo 'work in progress'
 }
 # Define Function
 ## Copy Data in Parallel
 function fetchdicom_copydata(){
+	[ ! -z ${DEBUG} ] && echo "fetchdicom_copydata"
 	# get name of desired series (this should be an input from fetchdicom_selectseries )
 	## note how all leading tabs, trailing spaces and commas are removed and replaced with underscores.. numers are prepended to indicate order and prevent merging
+	# task selection would have to happen somewhere before here
 	series=$(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | sed -n 's/Sequence Description//p' | nl | awk '{$1=$1};1' | tr -s ',' ' ' | tr -s ' ' '_')
 	# first create folders
-	parallel -k mkdir -p "${o}"/"${s}"/"{}" ::: "${series}"
+	parallel -k mkdir -p "${o}"/"${p}"/"${s}"/"{}" ::: "${series}"
 	# now copy all series into correct folder
 	## TODO :: add functionality for session
-	parallel -k --link --bar cp -r "{1}/* ${o}/${s}/{2}/" ::: "${series_files[@]}" ::: "${series}"
+	parallel -k --link --bar cp -r "{1}/* ${o}/${p}/${s}/{2}/" ::: "${series_files[@]}" ::: "${series}"
 }
 # Define Function
 ## Parse Meta-Data
 function fetchdicom_dataseek(){
+	[ ! -z ${DEBUG} ] && echo "fetchdicom_dataseek"
 	# count number of eleements
 	numstudies=${#studies_array[*]}
 	# Parse the Studies 
 	fetchdicom_parsestudies
 	#echo -e "🗒  ${numstudies} Studies Found..." # print number of studies found on this date
 	# get list of subjects acquired on this day
-	subjects=($(echo -e ${metadata_array[*]} | grep 'Subject ID' | uniq | awk '{print $NF}'))
+	subjects=()
+	pis=()
+	running_total=0	
+	for study_index in $(seq 0 $(expr ${numstudies} - 1)); do
+		subjects+=($(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | grep 'Subject ID' | awk '{print $NF}' | uniq | head -n 1))
+		pis+=($(echo -e ${metadata_array[*]:running_total:numseries_array[study_index]} | grep 'PI' | awk '{print $NF}' | uniq | head -n 1 | sed 's|^s||g'))
+		((running_total+=${numseries_array[study_index]}))
+	done
 #	echo found ... ${subjects[@]}
 #	echo in sessions ${studies_array[@]}
 	# index for loop
@@ -430,7 +466,7 @@ function fetchdicom_dataseek(){
 	running_total=0	
 	# print all subjects scanned on this date if no specific subject is input
 	if [ -z "${s}" ]; then
-	    echo 'Printing List of Subjects Scanned on This Day'
+	    #echo 'Printing List of Subjects Scanned on This Day'
 		# loop over studies	and print information
 		for stu in "${studies_array[@]}"; do # need to use @ instead of * to get delimited output (each sub as opposed to all subs on one line)
 			fetchdicom_parsestudy ${stu} # would be great to keep variables local and pass as arguments (need to figure out arrays)
@@ -448,10 +484,13 @@ function fetchdicom_dataseek(){
 			if [ "${s}" = "${sub}" ]; then
 				### TODO make this part cleaner.. so that information about subject is printed
 				fetchdicom_parsestudy && series_files=(${series_array[*]:running_total:numseries_array[study_index]}) && fetchdicom_copydata && flag='subjectfound'
-				echo -e "$(fetchdicom_parsestudy)"${metadata_array[*]:running_total:numseries_array[study_index]}"\n\nThis file was generated on $(date) by $(whoami)@$(hostname)\n\n" > ${o}/${s}/session-info.txt
+				echo -e "$(fetchdicom_parsestudy)${metadata_array[*]:running_total:numseries_array[study_index]}\n\nThis file was generated on $(date) by $(whoami)@$(hostname)\n\n" > ${o}/${p}/${s}/session-info.txt
 				#break
+			elif [[ "{s}" = 'all' ]]; then
+				fetchdicom_parsestudy && series_files=(${series_array[*]:running_total:numseries_array[study_index]}) && fetchdicom_copydata && flag='subjectfound'
+				echo -e "$(fetchdicom_parsestudy)${metadata_array[*]:running_total:numseries_array[study_index]}\n\nThis file was generated on $(date) by $(whoami)@$(hostname)\n\n" > ${o}/${p}/${s}/session-info.txt					
 			fi
-			((running_total+=${numseries_array[study_index]}))			
+			((running_total+=numseries_array[study_index]))			
 			((study_index++))
 		done	
 		#[ -z "${flag}" ] && echo "ERROR SUBJECT NOT FOUND ON ${y}-${m}-${d}" && exit
@@ -462,6 +501,7 @@ function fetchdicom_dataseek(){
 # Define Function
 ## Run sequence of functions for getting data
 function fetchdicom_run(){
+	[ ! -z ${DEBUG} ] && echo "fetchdicom_run"
 	# Parse Options
 	fetchdicom_parseoptions "$@"
 	# Check that all dependencies are installed
