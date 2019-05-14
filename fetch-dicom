@@ -1,5 +1,4 @@
-#!/bin/bash
-# Extract a Single Subject's DICOM from CFMI File-Systems 
+#!/bin/bash# Extract a Single Subject's DICOM from CFMI File-Systems 
 
 ## TODO -- make it a single date input and parse the date into yyyy/mm/dd
 ##      -- IMPORTANT :: check all sessions for ID EXHAUSTIVELY! you can miss data this way
@@ -182,8 +181,9 @@ function fetchdicom_traversetree(){
     #[ $(echo "${basedirs}" | grep "${s}") ] && studies=$(pwd)/$(ls -ld * | awk {'print $NF}' | grep "${s}")
 	#[ ! $(echo "${basedirs}" | grep "${s}") ] && studies=$(find ${r} -type d -name "*.STU" -print | xargs)
 	echo -e "\n🔍 Searching DICOM Directory Tree for *.STU Directories.. (this might take a while ☕️)" && studies=$(find ${r} -type d -name "*.STU" -print | xargs)
-    [ ! "${studies}" ] && echo -e "\n🚩 Session Folders *.STU Not Found, Searching for Series *.SER" && studies=$(find ${r} -type d -name "*.SER" -print | xargs)
-	studies_array=($(ls -ld ${studies} | awk '{print $NF}'))
+	[ ! "${studies}" ] && echo -e "\n🚩 Session Folders *.STU Not Found... " && exit
+    #[ ! "${studies}" ] && echo -e "\n🚩 Session Folders *.STU Not Found, Searching for Series *.SER" && studies=$(find ${r} -type d -name "*.SER" -print | xargs)
+	studies_array=($(find ${r} -name "${studies}" -type d))
 	# check for existence of sessions if date and subject name is given
 	echo -e "\n📂  Searching ${#studies_array[*]} Session(s) for *.SER Data for Subject ${s}\n"    
 	# echo "${studies}"
@@ -234,8 +234,11 @@ function fetchdicom_parsedcmheader(){
 	[ ! -z ${DEBUG} ] && echo "fetchdicom_parsedcmheader"
 	# Takes path to dicom file as input and cds to dicom file directory (dicom_hdr only works if dicom file is in cwd)
 	## TODO - make this just take the first folder in the list
-	find ${1} | head -1 
-	acqs=$(ls -dl ${1}/* | tail -n +1 | head -1 | awk '{print $NF}')
+	if [ -d ${1}/1.ACQ ]; then
+	 	acqs=${1}/1.ACQ
+	else
+		acqs=$(find ${1} -d 1 head -1)
+	fi
 	cd "${acqs}"
 	# No need to loop through .IMAs.. just grab meta data from first file in list
 	# local dicomfile=$(ls -dl *.IMA | tail -n +1 | head -1 | awk '{print $NF}')
@@ -438,7 +441,7 @@ function fetchdicom_copydata(){
 	parallel -k mkdir -p "${o}"/"${p}"/"${s}"/"{}" ::: "${series}"
 	# now copy all series into correct folder
 	## TODO :: add functionality for session
-	parallel -k --link --bar cp -r "{1}/* ${o}/${p}/${s}/{2}/" ::: "${series_files[@]}" ::: "${series}"
+	parallel -k --link --bar rsync -aHAXv --delete "{1} ${o}/${p}/${s}/{2}/" > /dev/null ::: "${series_files[@]}" ::: "${series}"
 }
 # Define Function
 ## Parse Meta-Data
